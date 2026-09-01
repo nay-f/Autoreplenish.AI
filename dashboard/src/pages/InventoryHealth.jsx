@@ -14,10 +14,16 @@ export function InventoryHealth() {
 
   useEffect(() => {
     async function init() {
-      const storeList = await api.getStores();
-      setStores(storeList);
-      if (storeList.length > 0) {
-        setSelectedStoreId(storeList[0].store_id);
+      try {
+        const storeList = await api.getStores();
+        if (Array.isArray(storeList)) {
+          setStores(storeList);
+          if (storeList.length > 0) {
+            setSelectedStoreId(storeList[0].store_id);
+          }
+        }
+      } catch (err) {
+        console.error('Failed to initialize stores:', err);
       }
     }
     init();
@@ -27,19 +33,37 @@ export function InventoryHealth() {
     async function loadHealth() {
       if (!selectedStoreId) return;
       setLoading(true);
-      const data = await api.getStoreInventoryHealth(selectedStoreId);
-      setHealthData(data);
-      setLoading(false);
+      try {
+        const data = await api.getStoreInventoryHealth(selectedStoreId);
+        setHealthData(data);
+      } catch (err) {
+        console.error('Failed to load inventory health:', err);
+      } finally {
+        setLoading(false);
+      }
     }
     loadHealth();
   }, [selectedStoreId]);
 
-  const filteredInventory = healthData?.inventory?.filter((item) => {
-    const matchesSearch = item.sku_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                          item.sku_id.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesCategory = categoryFilter === 'ALL' || item.category === categoryFilter;
+  const inventoryItems = healthData?.inventory || healthData?.items || [];
+  const summary = healthData?.summary || {
+    total_skus: inventoryItems.length,
+    stockout_risk: inventoryItems.filter(i => (i.status === 'STOCKOUT_RISK' || i.health_status === 'stockout_risk')).length,
+    overstock_risk: inventoryItems.filter(i => (i.status === 'OVERSTOCK_RISK' || i.health_status === 'overstock_risk')).length,
+    healthy: inventoryItems.filter(i => (i.status === 'HEALTHY' || i.health_status === 'healthy')).length,
+  };
+
+  const filteredInventory = inventoryItems.filter((item) => {
+    const skuName = item?.sku_name || '';
+    const skuId = item?.sku_id || '';
+    const matchesSearch = skuName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                          skuId.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesCategory = categoryFilter === 'ALL' || item?.category === categoryFilter;
     return matchesSearch && matchesCategory;
-  }) || [];
+  });
+
+  const totalSkus = summary?.total_skus || 1;
+  const healthyPct = Math.round(((summary?.healthy || 0) / totalSkus) * 100);
 
   return (
     <div className="space-y-6">
@@ -51,13 +75,13 @@ export function InventoryHealth() {
         </div>
 
         {/* Store Tabs */}
-        <div className="flex items-center gap-2 bg-slate-900/80 p-1.5 rounded-xl border border-slate-800">
-          <Store className="w-4 h-4 text-slate-400 ml-2" />
+        <div className="flex items-center gap-2 bg-slate-900/80 p-1.5 rounded-xl border border-slate-800 overflow-x-auto">
+          <Store className="w-4 h-4 text-slate-400 ml-2 shrink-0" />
           {stores.map((s) => (
             <button
               key={s.store_id}
               onClick={() => setSelectedStoreId(s.store_id)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition ${
                 selectedStoreId === s.store_id
                   ? 'bg-blue-600 text-white shadow-md'
                   : 'text-slate-400 hover:text-white hover:bg-slate-800'
@@ -70,39 +94,37 @@ export function InventoryHealth() {
       </div>
 
       {/* Summary KPI Cards */}
-      {healthData && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <StatCard
-            title="Total SKU Dipantau"
-            value={healthData.summary.total_skus}
-            subtitle={`${healthData.store_name} — Zone ${healthData.zone}`}
-            icon={Store}
-            color="blue"
-          />
-          <StatCard
-            title="Risiko Stockout"
-            value={healthData.summary.stockout_risk}
-            subtitle="Di bawah safety threshold"
-            icon={AlertTriangle}
-            color="rose"
-          />
-          <StatCard
-            title="Risiko Overstock"
-            value={healthData.summary.overstock_risk}
-            subtitle="> 2.5x safety threshold"
-            icon={PackageX}
-            color="amber"
-          />
-          <StatCard
-            title="Kondisi Sehat"
-            value={healthData.summary.healthy}
-            subtitle="Level stok optimal"
-            icon={CheckCircle2}
-            color="emerald"
-            trend={`${Math.round((healthData.summary.healthy / healthData.summary.total_skus) * 100)}%`}
-          />
-        </div>
-      )}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard
+          title="Total SKU Dipantau"
+          value={summary?.total_skus ?? 0}
+          subtitle={`${healthData?.store_name || selectedStoreId} — Zone ${healthData?.zone || 'JABODETABEK'}`}
+          icon={Store}
+          color="blue"
+        />
+        <StatCard
+          title="Risiko Stockout"
+          value={summary?.stockout_risk ?? 0}
+          subtitle="Di bawah safety threshold"
+          icon={AlertTriangle}
+          color="rose"
+        />
+        <StatCard
+          title="Risiko Overstock"
+          value={summary?.overstock_risk ?? 0}
+          subtitle="> 2.5x safety threshold"
+          icon={PackageX}
+          color="amber"
+        />
+        <StatCard
+          title="Kondisi Sehat"
+          value={summary?.healthy ?? 0}
+          subtitle="Level stok optimal"
+          icon={CheckCircle2}
+          color="emerald"
+          trend={`${healthyPct}%`}
+        />
+      </div>
 
       {/* Filter and Search Bar */}
       <div className="bg-slate-900/60 p-4 rounded-xl border border-slate-800 flex flex-col md:flex-row items-center justify-between gap-4">
@@ -169,16 +191,23 @@ export function InventoryHealth() {
                 </tr>
               ) : (
                 filteredInventory.map((item) => {
-                  const stockPct = Math.min(100, Math.round((item.physical_stock / item.threshold) * 100));
+                  const physicalStock = item?.physical_stock ?? 0;
+                  const threshold = item?.threshold || 1;
+                  const stockPct = Math.min(100, Math.round((physicalStock / threshold) * 100));
+                  const burnRate = item?.average_daily_burn_rate ?? 0;
+                  const leadTime = item?.lead_time_days ?? item?.default_lead_time_days ?? 1;
+                  const daysOfSupply = item?.days_of_supply ?? (burnRate > 0 ? (physicalStock / burnRate).toFixed(1) : '-');
+                  const status = item?.status || (physicalStock < threshold ? 'STOCKOUT_RISK' : 'HEALTHY');
+
                   return (
                     <tr key={item.sku_id} className="hover:bg-slate-800/30 transition">
                       <td className="py-3.5 px-4">
-                        <div className="font-semibold text-white">{item.sku_name}</div>
+                        <div className="font-semibold text-white">{item.sku_name || item.sku_id}</div>
                         <div className="text-[11px] text-slate-400 flex items-center gap-2 mt-0.5">
                           <span>{item.sku_id}</span>
                           <span className="text-slate-600">•</span>
-                          <span className={`px-1.5 py-0.2 rounded text-[10px] ${item.category === 'Perishable' ? 'bg-rose-500/10 text-rose-300 border border-rose-500/20' : 'bg-slate-800 text-slate-300'}`}>
-                            {item.category}
+                          <span className={`px-1.5 py-0.5 rounded text-[10px] ${item.category === 'Perishable' ? 'bg-rose-500/10 text-rose-300 border border-rose-500/20' : 'bg-slate-800 text-slate-300'}`}>
+                            {item.category || 'Non-Perishable'}
                           </span>
                           {item.weather_sensitive && (
                             <span className="text-blue-400 text-[10px]">🌦️ Weather-Sensitive</span>
@@ -189,14 +218,14 @@ export function InventoryHealth() {
                       <td className="py-3.5 px-4">
                         <div className="flex flex-col items-center gap-1">
                           <span className="font-bold text-white">
-                            {item.physical_stock} <span className="text-slate-400 font-normal">/ {item.threshold} Pcs</span>
+                            {physicalStock} <span className="text-slate-400 font-normal">/ {threshold} Pcs</span>
                           </span>
                           <div className="w-28 bg-slate-800 h-1.5 rounded-full overflow-hidden">
                             <div
                               className={`h-full rounded-full ${
-                                item.physical_stock < item.threshold
+                                physicalStock < threshold
                                   ? 'bg-rose-500'
-                                  : item.physical_stock > item.threshold * 2
+                                  : physicalStock > threshold * 2
                                   ? 'bg-amber-500'
                                   : 'bg-emerald-500'
                               }`}
@@ -207,21 +236,21 @@ export function InventoryHealth() {
                       </td>
 
                       <td className="py-3.5 px-4 text-center font-medium text-slate-200">
-                        {item.average_daily_burn_rate} Pcs / hari
+                        {burnRate} Pcs / hari
                       </td>
 
                       <td className="py-3.5 px-4 text-center text-slate-300">
-                        {item.lead_time_days} Hari
+                        {leadTime} Hari
                       </td>
 
                       <td className="py-3.5 px-4 text-center font-bold">
-                        <span className={item.days_of_supply <= 1.0 ? 'text-rose-400' : 'text-slate-200'}>
-                          {item.days_of_supply} Hari
+                        <span className={Number(daysOfSupply) <= 1.0 ? 'text-rose-400' : 'text-slate-200'}>
+                          {daysOfSupply} Hari
                         </span>
                       </td>
 
                       <td className="py-3.5 px-4 text-center">
-                        <RiskBadge status={item.status} />
+                        <RiskBadge status={status} />
                       </td>
                     </tr>
                   );

@@ -58,3 +58,12 @@ Thumbs.db
 .vscode/
 *.swp
 *.swo
+
+# Environment & Databases
+.env
+.env.*
+!.env.example
+*.db
+*.sqlite
+*.sqlite3
+
