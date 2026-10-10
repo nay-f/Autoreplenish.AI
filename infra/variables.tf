@@ -33,3 +33,77 @@ variable "afternoon_schedule_cron" {
   type        = string
   default     = "cron(0 7 * * ? *)"
 }
+
+variable "telegram_webhook_url" {
+  description = "Public HTTPS URL registered with Telegram as the webhook (leave empty to skip registration)"
+  type        = string
+  default     = ""
+}
+
+# -------------------------------------------------------------
+# Secrets (PRD Section 24: never hardcode credentials)
+# All default to empty so `terraform plan` succeeds without exposing anything.
+# Provide them at apply time, e.g. with a *.tfvars file that is NOT committed:
+#     terraform apply -var-file=secrets.auto.tfvars
+# Once populated, secret values are managed outside Terraform (see the
+# ignore_changes lifecycle in secrets.tf) so re-applies never revert them.
+# -------------------------------------------------------------
+variable "openweathermap_api_key" {
+  description = "OpenWeatherMap API key (weather-credentials secret)"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "telegram_bot_token" {
+  description = "Telegram bot token issued by @BotFather"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "telegram_chat_id" {
+  description = "Pilot store manager chat id for card delivery"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "telegram_webhook_secret" {
+  description = "Secret token sent in the X-Telegram-Bot-Api-Secret-Token header"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "sap_client_id" {
+  description = "SAP S/4HANA OAuth2 client id (leave empty to run in PERSISTENT_SANDBOX mode)"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "sap_client_secret" {
+  description = "SAP S/4HANA OAuth2 client secret (leave empty to run in PERSISTENT_SANDBOX mode)"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "sap_token_url" {
+  description = "SAP OAuth2 token endpoint"
+  type        = string
+  default     = ""
+}
+
+variable "sap_odata_base_url" {
+  description = "SAP OData service root, ending in API_PURCHASEREQ_PROCESS_SRV"
+  type        = string
+  default     = ""
+}
+
+variable "sap_client" {
+  description = "SAP client (mandt) used in the x-sap-client header"
+  type        = string
+  default     = "100"
+}

@@ -1,40 +1,80 @@
 # -------------------------------------------------------------
-# Lambda Function Definitions
+# Lambda deployment packaging
+#
+# The deployment artifact is produced by ./build.sh (or `make build`), which
+# installs backend/requirements.txt into backend/build/ and copies backend/src
+# alongside it. That directory becomes the root of the Lambda zip, so the
+# configured handlers resolve as `src.handlers.<module>.lambda_handler`.
+#
+# Running `make build` (or `bash build.sh`) before apply is REQUIRED; the
+# precondition below fails fast with an actionable message otherwise.
 # -------------------------------------------------------------
+locals {
+  build_dir      = "${path.module}/../backend/build"
+  lambda_zip     = "${path.module}/build/backend_pkg.zip"
+  lambda_timeout = 30
+  lambda_memory  = 512
+}
 
-# Archive placeholder for terraform plan / package
-data "archive_file" "backend_placeholder" {
+data "archive_file" "backend_package" {
   type        = "zip"
-  output_path = "${path.module}/build/backend_pkg.zip"
-  source {
-    content  = "# AutoReplenish placeholder\ndef handler(event, context):\n    return {'statusCode': 200, 'body': 'OK'}\n"
-    filename = "handler.py"
+  output_path = local.lambda_zip
+
+  # backend/build contains src/ + vendored requirements. Excluding caches keeps
+  # the artifact small and comfortably under the 50 MB direct-upload limit.
+  source_dir = local.build_dir
+
+  excludes = [
+    "__pycache__",
+    "*.pyc",
+    "*.pyo",
+    "*.dist-info",
+    "*.egg-info",
+    ".pytest_cache",
+  ]
+
+  lifecycle {
+    precondition {
+      condition     = fileexists("${local.build_dir}/src/handlers/scheduled_eval_handler.py")
+      error_message = "backend/build/src/handlers/scheduled_eval_handler.py not found. Run `bash build.sh` (or `make build`) before `terraform apply`."
+    }
   }
 }
 
-# 1. Orchestrator Lambda
+# -------------------------------------------------------------
+# Lambda Function Definitions
+# -------------------------------------------------------------
+
+# 1. Orchestrator Lambda (EventBridge -> reasoning -> Telegram)
 resource "aws_lambda_function" "orchestrator" {
   function_name    = "autoreplenish-orchestrator-${var.environment}"
   description      = "Scheduled evaluation, context aggregation, Bedrock reasoning, and Telegram notification"
   role             = aws_iam_role.orchestrator_role.arn
   runtime          = "python3.11"
   handler          = "src.handlers.scheduled_eval_handler.lambda_handler"
-  filename         = data.archive_file.backend_placeholder.output_path
-  source_code_hash = data.archive_file.backend_placeholder.output_base64sha256
+  filename         = data.archive_file.backend_package.output_path
+  source_code_hash = data.archive_file.backend_package.output_base64sha256
   timeout          = 60
-  memory_size      = 512
+  memory_size      = local.lambda_memory
 
   environment {
     variables = {
-      ENVIRONMENT           = var.environment
-      DYNAMODB_TABLE        = aws_dynamodb_table.main_table.name
-      BEDROCK_MODEL_ID      = var.bedrock_model_id
-      WEATHER_SECRET_NAME   = aws_secretsmanager_secret.weather_credentials.name
-      TELEGRAM_SECRET_NAME  = aws_secretsmanager_secret.telegram_credentials.name
-      SAP_PR_QUEUE_URL      = aws_sqs_queue.sap_pr_queue.url
-      LOG_LEVEL             = "INFO"
+      ENVIRONMENT               = var.environment
+      AWS_REGION_NAME           = var.aws_region
+      DYNAMODB_TABLE            = aws_dynamodb_table.main_table.name
+      BEDROCK_MODEL_ID          = var.bedrock_model_id
+      WEATHER_SECRET_NAME       = aws_secretsmanager_secret.weather_credentials.name
+      TELEGRAM_SECRET_NAME      = aws_secretsmanager_secret.telegram_credentials.name
+      SAP_PR_QUEUE_URL          = aws_sqs_queue.sap_pr_queue.url
+      WEATHER_CACHE_TTL_HOURS   = "6"
+      WEATHER_CACHE_VALID_HOURS = "3"
+      APPROVAL_TIMEOUT_HOURS    = "4"
+      MAX_BEDROCK_RETRIES       = "2"
+      LOG_LEVEL                 = "INFO"
     }
   }
+
+  depends_on = [data.archive_file.backend_package]
 
   tags = {
     Component = "Orchestrator"
@@ -48,9 +88,9 @@ resource "aws_lambda_function" "telegram_webhook" {
   role             = aws_iam_role.telegram_webhook_role.arn
   runtime          = "python3.11"
   handler          = "src.handlers.telegram_webhook_handler.lambda_handler"
-  filename         = data.archive_file.backend_placeholder.output_path
-  source_code_hash = data.archive_file.backend_placeholder.output_base64sha256
-  timeout          = 30
+  filename         = data.archive_file.backend_package.output_path
+  source_code_hash = data.archive_file.backend_package.output_base64sha256
+  timeout          = local.lambda_timeout
   memory_size      = 256
 
   environment {
@@ -64,6 +104,8 @@ resource "aws_lambda_function" "telegram_webhook" {
     }
   }
 
+  depends_on = [data.archive_file.backend_package]
+
   tags = {
     Component = "TelegramWebhook"
   }
@@ -76,10 +118,10 @@ resource "aws_lambda_function" "sap_worker" {
   role             = aws_iam_role.sap_worker_role.arn
   runtime          = "python3.11"
   handler          = "src.handlers.sap_worker_handler.lambda_handler"
-  filename         = data.archive_file.backend_placeholder.output_path
-  source_code_hash = data.archive_file.backend_placeholder.output_base64sha256
+  filename         = data.archive_file.backend_package.output_path
+  source_code_hash = data.archive_file.backend_package.output_base64sha256
   timeout          = 60
-  memory_size      = 512
+  memory_size      = local.lambda_memory
 
   environment {
     variables = {
@@ -89,6 +131,8 @@ resource "aws_lambda_function" "sap_worker" {
       LOG_LEVEL       = "INFO"
     }
   }
+
+  depends_on = [data.archive_file.backend_package]
 
   tags = {
     Component = "SapWorker"
@@ -101,6 +145,10 @@ resource "aws_lambda_event_source_mapping" "sap_worker_sqs" {
   function_name    = aws_lambda_function.sap_worker.arn
   batch_size       = 5
   enabled          = true
+
+  # Retry transient SAP gateway blips inside the handler before the message
+  # becomes visible again and is retried by SQS.
+  function_response_types = ["ReportBatchItemFailures"]
 }
 
 # 4. Dashboard API Lambda
@@ -110,9 +158,9 @@ resource "aws_lambda_function" "dashboard_api" {
   role             = aws_iam_role.dashboard_api_role.arn
   runtime          = "python3.11"
   handler          = "src.handlers.dashboard_api_handler.lambda_handler"
-  filename         = data.archive_file.backend_placeholder.output_path
-  source_code_hash = data.archive_file.backend_placeholder.output_base64sha256
-  timeout          = 30
+  filename         = data.archive_file.backend_package.output_path
+  source_code_hash = data.archive_file.backend_package.output_base64sha256
+  timeout          = local.lambda_timeout
   memory_size      = 256
 
   environment {
@@ -122,6 +170,8 @@ resource "aws_lambda_function" "dashboard_api" {
       LOG_LEVEL      = "INFO"
     }
   }
+
+  depends_on = [data.archive_file.backend_package]
 
   tags = {
     Component = "DashboardApi"

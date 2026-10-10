@@ -2,18 +2,31 @@ import React, { useState, useEffect } from 'react';
 import { api } from '../services/api';
 import { StatCard } from '../components/StatCard';
 import { RiskBadge } from '../components/RiskBadge';
-import { Store, AlertTriangle, PackageX, CheckCircle2, Search, Filter } from 'lucide-react';
+import {
+  Store,
+  AlertTriangle,
+  PackageX,
+  CheckCircle2,
+  Search,
+  Filter,
+  PlusCircle,
+  Send,
+  Database,
+  ArrowRight,
+} from 'lucide-react';
 
 export function InventoryHealth() {
   const [stores, setStores] = useState([]);
-  const [selectedStoreId, setSelectedStoreId] = useState('STR-001');
+  const [selectedStoreId, setSelectedStoreId] = useState('');
   const [healthData, setHealthData] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('ALL');
   const [loading, setLoading] = useState(true);
+  const [loadingStores, setLoadingStores] = useState(true);
 
   useEffect(() => {
     async function init() {
+      setLoadingStores(true);
       try {
         const storeList = await api.getStores();
         if (Array.isArray(storeList)) {
@@ -24,6 +37,8 @@ export function InventoryHealth() {
         }
       } catch (err) {
         console.error('Failed to initialize stores:', err);
+      } finally {
+        setLoadingStores(false);
       }
     }
     init();
@@ -31,13 +46,18 @@ export function InventoryHealth() {
 
   useEffect(() => {
     async function loadHealth() {
-      if (!selectedStoreId) return;
+      if (!selectedStoreId) {
+        setHealthData(null);
+        setLoading(false);
+        return;
+      }
       setLoading(true);
       try {
         const data = await api.getStoreInventoryHealth(selectedStoreId);
         setHealthData(data);
       } catch (err) {
         console.error('Failed to load inventory health:', err);
+        setHealthData(null);
       } finally {
         setLoading(false);
       }
@@ -45,25 +65,85 @@ export function InventoryHealth() {
     loadHealth();
   }, [selectedStoreId]);
 
+  // Informative Empty State when no stores are registered
+  if (!loadingStores && stores.length === 0) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h2 className="text-xl font-bold text-white tracking-tight">Multi-Store Inventory Health</h2>
+          <p className="text-xs text-slate-400">
+            Monitoring level stok fisik, ambang batas safety, dan risiko stockout/overstock per cabang
+          </p>
+        </div>
+
+        <div className="p-8 sm:p-12 rounded-3xl bg-slate-900/80 border border-slate-800 text-center flex flex-col items-center justify-center max-w-2xl mx-auto shadow-2xl">
+          <div className="w-16 h-16 rounded-2xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400 mb-4">
+            <Store className="w-8 h-8" />
+          </div>
+          <h3 className="text-lg font-bold text-white">Belum Ada Data Inventaris</h3>
+          <p className="text-xs text-slate-400 mt-2 max-w-md leading-relaxed">
+            Belum ada toko yang terdaftar di database sistem. Daftarkan toko pertama Anda atau sinkronkan data kasir
+            terlebih dahulu untuk mulai memantau kesehatan inventaris.
+          </p>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full max-w-lg mt-6">
+            <a
+              href="#store-settings"
+              onClick={() => {
+                window.location.hash = 'store-settings';
+              }}
+              className="p-3.5 rounded-xl bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/40 text-left transition group"
+            >
+              <div className="flex items-center justify-between text-blue-300 font-bold text-xs">
+                <span>Daftarkan via Web</span>
+                <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
+              </div>
+              <p className="text-[11px] text-slate-400 mt-1">
+                Buka menu Store Settings untuk konfigurasi toko baru & aturan SKU.
+              </p>
+            </a>
+
+            <div className="p-3.5 rounded-xl bg-slate-800/60 border border-slate-700/60 text-left">
+              <div className="flex items-center gap-1.5 text-emerald-300 font-bold text-xs">
+                <Send className="w-3.5 h-3.5" />
+                <span>Onboarding via Telegram</span>
+              </div>
+              <p className="text-[11px] text-slate-400 mt-1">
+                Kirim perintah <code>/register_store</code> pada bot Telegram pengelola.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const inventoryItems = healthData?.inventory || healthData?.items || [];
   const summary = healthData?.summary || {
     total_skus: inventoryItems.length,
-    stockout_risk: inventoryItems.filter(i => (i.status === 'STOCKOUT_RISK' || i.health_status === 'stockout_risk')).length,
-    overstock_risk: inventoryItems.filter(i => (i.status === 'OVERSTOCK_RISK' || i.health_status === 'overstock_risk')).length,
-    healthy: inventoryItems.filter(i => (i.status === 'HEALTHY' || i.health_status === 'healthy')).length,
+    stockout_risk: inventoryItems.filter(
+      (i) => i.status === 'STOCKOUT_RISK' || i.health_status === 'stockout_risk'
+    ).length,
+    overstock_risk: inventoryItems.filter(
+      (i) => i.status === 'OVERSTOCK_RISK' || i.health_status === 'overstock_risk'
+    ).length,
+    healthy: inventoryItems.filter(
+      (i) => i.status === 'HEALTHY' || i.health_status === 'healthy'
+    ).length,
   };
 
   const filteredInventory = inventoryItems.filter((item) => {
     const skuName = item?.sku_name || '';
     const skuId = item?.sku_id || '';
-    const matchesSearch = skuName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                          skuId.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesSearch =
+      skuName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      skuId.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesCategory = categoryFilter === 'ALL' || item?.category === categoryFilter;
     return matchesSearch && matchesCategory;
   });
 
-  const totalSkus = summary?.total_skus || 1;
-  const healthyPct = Math.round(((summary?.healthy || 0) / totalSkus) * 100);
+  const totalSkus = summary?.total_skus || 0;
+  const healthyPct = totalSkus > 0 ? Math.round(((summary?.healthy || 0) / totalSkus) * 100) : 0;
 
   return (
     <div className="space-y-6">
@@ -71,7 +151,9 @@ export function InventoryHealth() {
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h2 className="text-xl font-bold text-white tracking-tight">Multi-Store Inventory Health</h2>
-          <p className="text-xs text-slate-400">Monitoring level stok fisik, ambang batas safety, dan risiko stockout/overstock per cabang</p>
+          <p className="text-xs text-slate-400">
+            Monitoring level stok fisik, ambang batas safety, dan risiko stockout/overstock per cabang
+          </p>
         </div>
 
         {/* Store Tabs */}
@@ -87,7 +169,7 @@ export function InventoryHealth() {
                   : 'text-slate-400 hover:text-white hover:bg-slate-800'
               }`}
             >
-              {s.store_name} ({s.area_type})
+              {s.store_name} ({s.area_type || 'Umum'})
             </button>
           ))}
         </div>
@@ -98,7 +180,9 @@ export function InventoryHealth() {
         <StatCard
           title="Total SKU Dipantau"
           value={summary?.total_skus ?? 0}
-          subtitle={`${healthData?.store_name || selectedStoreId} — Zone ${healthData?.zone || 'JABODETABEK'}`}
+          subtitle={`${healthData?.store_name || selectedStoreId} — Zone ${
+            healthData?.zone || 'JABODETABEK'
+          }`}
           icon={Store}
           color="blue"
         />
@@ -122,7 +206,7 @@ export function InventoryHealth() {
           subtitle="Level stok optimal"
           icon={CheckCircle2}
           color="emerald"
-          trend={`${healthyPct}%`}
+          trend={totalSkus > 0 ? `${healthyPct}%` : undefined}
         />
       </div>
 
@@ -186,7 +270,7 @@ export function InventoryHealth() {
               ) : filteredInventory.length === 0 ? (
                 <tr>
                   <td colSpan="6" className="py-8 text-center text-slate-400">
-                    Tidak ada SKU yang cocok dengan filter.
+                    Tidak ada SKU yang cocok dengan filter atau belum ada data inventaris untuk toko ini.
                   </td>
                 </tr>
               ) : (
@@ -196,8 +280,10 @@ export function InventoryHealth() {
                   const stockPct = Math.min(100, Math.round((physicalStock / threshold) * 100));
                   const burnRate = item?.average_daily_burn_rate ?? 0;
                   const leadTime = item?.lead_time_days ?? item?.default_lead_time_days ?? 1;
-                  const daysOfSupply = item?.days_of_supply ?? (burnRate > 0 ? (physicalStock / burnRate).toFixed(1) : '-');
-                  const status = item?.status || (physicalStock < threshold ? 'STOCKOUT_RISK' : 'HEALTHY');
+                  const daysOfSupply =
+                    item?.days_of_supply ?? (burnRate > 0 ? (physicalStock / burnRate).toFixed(1) : '-');
+                  const status =
+                    item?.status || (physicalStock < threshold ? 'STOCKOUT_RISK' : 'HEALTHY');
 
                   return (
                     <tr key={item.sku_id} className="hover:bg-slate-800/30 transition">
@@ -206,7 +292,13 @@ export function InventoryHealth() {
                         <div className="text-[11px] text-slate-400 flex items-center gap-2 mt-0.5">
                           <span>{item.sku_id}</span>
                           <span className="text-slate-600">•</span>
-                          <span className={`px-1.5 py-0.5 rounded text-[10px] ${item.category === 'Perishable' ? 'bg-rose-500/10 text-rose-300 border border-rose-500/20' : 'bg-slate-800 text-slate-300'}`}>
+                          <span
+                            className={`px-1.5 py-0.5 rounded text-[10px] ${
+                              item.category === 'Perishable'
+                                ? 'bg-rose-500/10 text-rose-300 border border-rose-500/20'
+                                : 'bg-slate-800 text-slate-300'
+                            }`}
+                          >
                             {item.category || 'Non-Perishable'}
                           </span>
                           {item.weather_sensitive && (
@@ -239,9 +331,7 @@ export function InventoryHealth() {
                         {burnRate} Pcs / hari
                       </td>
 
-                      <td className="py-3.5 px-4 text-center text-slate-300">
-                        {leadTime} Hari
-                      </td>
+                      <td className="py-3.5 px-4 text-center text-slate-300">{leadTime} Hari</td>
 
                       <td className="py-3.5 px-4 text-center font-bold">
                         <span className={Number(daysOfSupply) <= 1.0 ? 'text-rose-400' : 'text-slate-200'}>

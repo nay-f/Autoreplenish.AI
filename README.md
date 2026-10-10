@@ -6,292 +6,255 @@
 
 *Mitigating Stockouts & Overstock with Context-Aware AI Reasoning, Human-in-the-Loop Telegram Interaction, and SAP S/4HANA Integration.*
 
-[![Python](https://img.shields.io/badge/Python-3.11%2B-blue.svg?logo=python&logoColor=white)](https://python.org)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.109%2B-009688.svg?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
-[![React](https://img.shields.io/badge/React-18.2-61DAFB.svg?logo=react&logoColor=black)](https://react.dev)
-[![AWS Bedrock](https://img.shields.io/badge/AWS%20Bedrock-Claude%203.5%20Sonnet-FF9900.svg?logo=amazon-aws&logoColor=white)](https://aws.amazon.com/bedrock/)
-[![SAP S/4HANA](https://img.shields.io/badge/SAP-S%2F4HANA%20OData-0FAAFF.svg?logo=sap&logoColor=white)](https://sap.com)
-[![Telegram Bot](https://img.shields.io/badge/Telegram-Bot%20API-2CA5E0.svg?logo=telegram&logoColor=white)](https://core.telegram.org/bots)
-[![Terraform](https://img.shields.io/badge/IaC-Terraform-7B42BC.svg?logo=terraform&logoColor=white)](https://terraform.io)
+[![Python](https://img.shields.io/badge/Python-3.11%2B-blue.svg?logo=python&logoColor=white)](#)
+[![React](https://img.shields.io/badge/React-18.2-61DAFB.svg?logo=react&logoColorwhite)](#)
+[![AWS Bedrock](https://img.shields.io/badge/AWS%20Bedrock-Claude%203.5%20Sonnet-FF9900.svg?logo=amazon-aws&logoColorwhite)](#)
+[![SAP](https://img.shields.io/badge/SAP-S%2F4HANA%20OData-0FAAFF.svg?logo=sap&logoColorwhite)](#)
+[![Terraform](https://img.shields.io/badge/IaC-Terraform-7B42BC.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-118%20passing-brightgreen.svg)](#)
 
 </div>
 
 ---
 
-## 🌟 Ringkasan Eksekutif (Executive Summary)
+## 🌟 Ringkasan Eksekutif
 
-**AutoReplenish.ai** adalah platform orkestrasi rantai pasok cerdas (*Agentic AI*) berbasis *Human-in-the-Loop* yang dirancang khusus untuk jaringan minimarket ritel modern. 
+**AutoReplenish.ai** adalah platform orkestrasi rantai pasok cerdas (*Agentic AI*) berbasis *Human-in-the-Loop* untuk jaringan minimarket. Sistem menggantikan proses *restocking* manual yang lambat dan rentan bias dengan analisis prediktif multi-variabel otomatis.
 
-Sistem ini menggantikan proses *restocking* manual yang lambat dan rentan bias dengan analisis prediktif multi-variabel otomatis. Menggunakan model AI canggih (**Claude 3.5 Sonnet via AWS Bedrock**), sistem mengevaluasi dinamika stok, cuaca lokal, kalender belanja, dan batasan operasional supplier sebelum mengajukan rekomendasi pemesanan langsung ke aplikasi Telegram Kepala Toko.
+Menggunakan **Claude 3.5 Sonnet via AWS Bedrock**, sistem mengevaluasi dinamika stok, cuaca lokal, kalender belanja, dan batasan operasional supplier (MOQ, kelipatan kemasan, *shelf life*) sebelum mengajukan rekomendasi pemesanan ke aplikasi Telegram Kepala Toko. Setelah disetujui, *Purchase Requisition* diterbitkan ke **SAP S/4HANA** melalui OData.
 
----
-
-## 🎯 Masalah Bisnis & Solusi
-
-| Tantangan Ritel Tradisional | Solusi AutoReplenish.ai |
-| :--- | :--- |
-| **Stockout (Kehabisan Stok):** Penjualan hilang karena pesanan terlambat atau tidak memperhitungkan *lead time* dan lonjakan promo. | **Proactive Replenishment:** Evaluasi berkala yang memprioritaskan SKU di bawah *safety threshold* dan memperhitungkan *burn rate* harian. |
-| **Overstock & Waste:** Kerugian akibat produk *perishable* (makanan/roti/susu) kedaluwarsa karena memesan berlebih saat traffic toko sepi. | **Weather & Demographic Guardrails:** Penyesuaian kuota cerdas (contoh: memangkas pesanan perishable di area perkantoran saat akhir pekan & hujan lebat). |
-| **Human Error & Latensi:** Kepala Toko membutuhkan waktu lama untuk menghitung pesanan dan menginput PR secara manual ke ERP. | **Interactive Telegram Bot:** Approval/Edit/Reject dengan 1-klik di Telegram yang otomatis menerbitkan Purchase Requisition ke SAP S/4HANA. |
-| **Blackbox Decision:** Ketidakpercayaan manajer terhadap angka rekomendasi sistem otomatis. | **Explainable AI (XAI) & Audit Trail:** Setiap keputusan dilengkapi narasi penalaran Bahasa Indonesia dan jejak audit transparan di Dashboard. |
+**Pilot gerai:** Toko Almadina Sembako — W36X+286, Beru Kulon, Kalirejo, Kec. Wirosari, Grobogan, Jawa Tengah 58192.
 
 ---
 
-## 🏗️ Arsitektur Sistem
+## 🏗️ Arsitektur Sistem (AWS)
 
 ```mermaid
 flowchart TD
-    subgraph TriggerLayer ["1. Trigger & Event Layer"]
-        EB["⏰ EventBridge / Cron Schedule"]
+    EB["⏰ EventBridge<br/>05:00 & 14:00 WIB"] --> ORCH["⚙️ Orchestrator Lambda<br/>prioritas → agregasi konteks"]
+
+    subgraph Signals
+        OWM["🌤️ OpenWeatherMap<br/>Wirosari -7.0864, 111.1687"]
+        CAL["📅 Kalender / Payday / Promo"]
+        SAP_R["📖 SAP S/4HANA<br/>Baca stok & material"]
     end
 
-    subgraph DataAggregation ["2. Context Aggregator"]
-        INV[("📊 Store Inventory & Threshold")]
-        WEATHER["🌤️ Weather Forecast (OpenWeather)"]
-        CALENDAR["📅 Calendar, Payday & Promo"]
-        SKU["📋 SKU Profile & MOQ/Packaging"]
-    end
+    ORCH --> OWM
+    ORCH --> CAL
+    ORCH --> SAP_R
 
-    subgraph ReasoningLayer ["3. Agentic AI Reasoning Engine"]
-        BEDROCK["🧠 AWS Bedrock (Claude 3.5 Sonnet)<br/>• Multi-Variable Priority Matrix<br/>• Strict JSON Schema Guardrails<br/>• Natural Language Narrative (ID)"]
-    end
+    DDB[("🗄️ DynamoDB Single-Table<br/>PK/SK + GSI1 + GSI2<br/>TTL 6 jam (cache cuaca)")]
+    ORCH <--> DDB
 
-    subgraph HITLLayer ["4. Human-in-the-Loop Interaction"]
-        TG["📱 Telegram Bot API<br/>Interactive Cards & Inline Buttons"]
-        USER{"👤 Store Manager<br/>Decision"}
-    end
+    ORCH --> BR["🧠 AWS Bedrock<br/>Claude 3.5 Sonnet<br/>strict JSON + fallback terkontroll"]
+    BR --> ORCH
 
-    subgraph ExecutionLayer ["5. Enterprise ERP Integration"]
-        SAP["🏢 SAP S/4HANA (OData API)<br/>• Purchase Requisition (PR)<br/>• Strict Idempotency Protection"]
-    end
+    ORCH --> TG["📱 Telegram Bot API<br/>sendMessage + inline keyboard"]
+    TG --> MGR{"👤 Kepala Toko<br/>Approve / Edit / Reject"}
 
-    subgraph DashboardLayer ["6. Observability & Control Center"]
-        DASH["💻 React Dashboard UI (Port 3000)<br/>• Multi-Store Inventory Health<br/>• Agent Reasoning Trace<br/>• SAP Integration Monitor<br/>• Feedback Analytics"]
-    end
+    MGR --> WH["⚙️ Telegram Webhook Lambda<br/>answerCallbackQuery → editMessageText"]
+    WH --> DDB
+    WH --> SQS["📬 SQS FIFO<br/>+ DLQ"]
 
-    EB --> DataAggregation
-    DataAggregation --> BEDROCK
-    BEDROCK --> TG
-    TG --> USER
-    USER -- "✅ Approve / ✏️ Edit" --> SAP
-    USER -- "❌ Reject (Reason)" --> DASH
-    SAP --> DASH
-    BEDROCK --> DASH
+    SQS --> WK["⚙️ SAP Worker Lambda"]
+    WK --> SAPP["🏢 SAP S/4HANA OData<br/>API_PURCHASEREQ_PROCESS_SRV<br/>OAuth2 + X-CSRF-Token"]
+    SAPP --> WK
+    WK --> DDB
+
+    DDB --> API["⚙️ Dashboard API Lambda"]
+    API --> UI["💻 React Control Center<br/>Vite + Tailwind"]
+```
+
+### Komponen utama
+
+| Komponen | Implementasi | Berkas |
+| :--- | :--- | :--- |
+| **Orchestration & Trigger** | EventBridge → Lambda (boto3 SDK riil) | `infra/eventbridge.tf`, `backend/src/handlers/scheduled_eval_handler.py` |
+| **Reasoning Engine** | Bedrock `invoke_model` (Claude 3.5 Sonnet), 2x retry, fallback deterministik ber-flag `is_fallback` | `backend/src/services/bedrock_service.py` |
+| **System of Record (tulis)** | SAP OData deep-insert, OAuth2 + CSRF, **LIVE & PERSISTENT_SANDBOX dual-mode** | `backend/src/services/sap_service.py` |
+| **State & Caching** | DynamoDB single-table (PK/SK + GSI1 + GSI2), boto3 resource | `backend/src/services/dynamodb_service.py` |
+| **External Signal** | OpenWeatherMap HTTP GET, cache 3 jam valid / TTL 6 jam, degradasi stale→unavailable | `backend/src/services/weather_service.py` |
+| **Human Interface** | Telegram Bot API: `sendMessage`, `answerCallbackQuery`, `editMessageText` | `backend/src/services/telegram_service.py`, `backend/src/handlers/telegram_webhook_handler.py` |
+| **Monitoring UI** | React dashboard, tanpa fallback data palsu | `dashboard/src/` |
+
+---
+
+## 📁 Struktur Direktori
+
+```text
+AutoReplenish.ai/
+├── backend/                          # Source code produksi (AWS Lambda)
+│   ├── requirements.txt              # DEPENDENSI RUNTIME (di-vendor ke ZIP Lambda)
+│   ├── requirements-dev.txt          # Dependensi uji (TIDAK masuk ZIP)
+│   ├── build/                        # [dihasilkan] root paket deployment Lambda
+│   └── src/
+│       ├── config.py                 # Env vars & konstanta operasional
+│       ├── models/schema.py          # Dataclass + atribut GSI untuk single-table
+│       ├── handlers/                 # Lambda entry points (4 fungsi)
+│       │   ├── scheduled_eval_handler.py     # EventBridge → orkestrasi
+│       │   ├── telegram_webhook_handler.py   # Callback HITL + SQS dispatch
+│       │   ├── sap_worker_handler.py         # Konsumer SQS → PR SAP
+│       │   └── dashboard_api_handler.py      # REST read-only (API Gateway)
+│       └── services/
+│           ├── bedrock_service.py    # Bedrock invoke_model + fallback
+│           ├── sap_service.py        # Dual-mode LIVE / PERSISTENT_SANDBOX
+│           ├── dynamodb_service.py   # CRUD boto3 + akses GSI + counter atomik
+│           ├── weather_service.py    # OpenWeatherMap + cache TTL
+│           ├── telegram_service.py   # Bot API riil
+│           ├── secrets_service.py    # Secrets Manager (cache per container)
+│           ├── orchestrator_service.py
+│           ├── calendar_promo_service.py
+│           └── moq_packaging_service.py
+│
+├── dashboard/                        # React Control Center (Vite + Tailwind)
+│   └── src/services/api.js           # Konektor REST (tanpa data palsu)
+│
+├── demo/                             # Demo lokal 100% offline (murni presentasi)
+│   └── services/  mock_bedrock / mock_sap / mock_weather / local_db (SQLite) / telegram_bot (REAL)
+│
+├── infra/                            # Terraform (4 Lambda, DynamoDB, SQS, IAM, Secrets)
+├── tests/                            # 118 unit/e2e tests (moto-emulated AWS)
+├── build.sh / Makefile               # Paket deployment Lambda
+└── PRD.md                            # Product Requirements Document v1.0
+```
+
+---
+
+## 🚀 Menyiapkan & Menjalankan
+
+### 1. Konfigurasi kredensial
+
+Semua kredensial disimpan di **AWS Secrets Manager**, dibuat oleh Terraform dari variabel `sensitive` (tidak ada rahasia yang di-*commit*). Buat berkas `infra/secrets.auto.tfvars` (sudah di-*gitignore*):
+
+```hcl
+openweathermap_api_key = "kunci-openweathermap-anda"
+telegram_bot_token      = "token-dari-botfather"
+telegram_chat_id        = "chat-id-manager-toko"
+telegram_webhook_secret = "string-acak-panjang"
+telegram_webhook_url    = ""   # diisi setelah API Gateway dibuat
+
+# Kosongkan SAP agar sistem berjalan dalam mode PERSISTENT_SANDBOX.
+sap_client_id     = ""
+sap_client_secret = ""
+sap_token_url     = ""
+sap_odata_base_url = ""
+```
+
+> **Catatan Bedrock:** aktifkan akses model `anthropic.claude-3-5-sonnet-20241022-v2:0` di
+> Bedrock Console → *Model access* (region `ap-southeast-1`).
+
+### 2. Paket deployment & deploy
+
+```bash
+make check-env     # verifikasi python/bash/terraform
+make build         # backend/build → root ZIP Lambda (src + dependensi)
+make test          # 118 unit & e2e tests (moto, tanpa akun AWS)
+
+cd infra && terraform init
+terraform plan  -var-file=secrets.auto.tfvars
+terraform apply -var-file=secrets.auto.tfvars
+```
+
+### 3. Registrasi webhook Telegram
+
+```bash
+API=$(terraform -chdir=infra output -raw api_gateway_endpoint)
+curl -X POST "https://api.telegram.org/bot<TOKEN>/setWebhook" \
+  -H "Content-Type: application/json" \
+  -d "{\"url\": \"${API}webhook/telegram\", \"secret_token\": \"<WEBHOOK_SECRET>\"}"
+```
+
+### 4. Jalankan Dashboard
+
+```bash
+cd dashboard
+npm install
+# Untuk demo lokal: jalankan demo/scripts/05_dashboard_api.py (port 8000)
+# Untuk AWS: set VITE_API_BASE_URL ke URL API Gateway pada dashboard/.env
+npm run dev
 ```
 
 ---
 
 ## 🧠 Matriks Bobot Penalaran Multi-Variabel
 
-Agen AI mengevaluasi replenishment menggunakan bobot prioritas multi-faktor:
+Agen AI (Claude 3.5 Sonnet) menalar terhadap:
 
-1. **Histori Penjualan & Level Stok (35% – 40%):** Membandingkan stok fisik vs ambang batas (*threshold*) dan laju konsumsi (*daily burn rate*).
-2. **Jadwal Supplier & Lead Time (20% – 25%):** Mengantisipasi waktu tunggu pengiriman vendor (*lead time* 1–3 hari).
-3. **Katalog Promosi Internal (15% – 20%):** Mendeteksi promo aktif (Beli 1 Gratis 1 / Diskon Gajian) untuk menaikkan kuota *buffer*.
-4. **Kondisi Cuaca & Suhu (10% – 15%):** Mendeteksi hujan deras/ekstrem yang menurunkan kunjungan konsumen fisik.
-5. **Kalender & Demografi Wilayah (5% – 10%):** Menyesuaikan tipe area toko (*Perkantoran vs Perumahan vs Kampus*) dan tipe hari (*Weekday vs Weekend*).
-6. **Batasan Fisik Kemasan:** Penyesuaian otomatis terhadap kelipatan kemasan (*packaging multiple*) dan *Minimum Order Quantity (MOQ)*.
-
----
-
-## 💻 Fitur Control Center Dashboard (React.js)
-
-Dashboard kontrol web interaktif berjalan di `http://localhost:3000` dengan 4 modul utama:
-
-| Modul | Deskripsi |
+| Bobot | Variabel |
 | :--- | :--- |
-| 🏬 **Multi-Store Inventory Health** | Pemantauan stok real-time per cabang (Cabang Sudirman, Kemang, UI Depok) dengan indikator visual *Stockout Risk*, *Overstock Risk*, dan *Days of Supply*. |
-| 🔍 **Agent Reasoning Trace** | Audit log transparansi penuh yang menampilkan input konteks, model version, skor kepercayaan (*confidence*), tingkat risiko, dan narasi penalaran AI. |
-| ⚡ **SAP Integration Monitor** | Pemantauan koneksi OData API, SLA keberhasilan PR (> 99%), latensi server SAP, dan daftar transaksi PR *idempotent*. |
-| 📊 **Feedback Analytics** | Analisis keputusan Kepala Toko (*Approval Rate*, *Rejection Rate*, *Edit Rate*) serta grafik alasan penolakan untuk *Continuous Learning*. |
+| 35–40% | Stok fisik vs threshold & histori *burn rate* |
+| 20–25% | Jadwal supplier & *lead time* |
+| 15–20% | Katalog promo internal |
+| 10–15% | Cuaca & suhu (OpenWeatherMap) |
+| 5–10% | Kalender, payday, hari libur, demografi wilayah |
+| Batasan fisik | MOQ, kelipatan kemasan, **shelf life**, kerapuhan barang |
+
+### Guardrail penalaran
+
+- **Strict JSON**: output tervalidasi terhadap skema; markdown fence dibersihkan.
+- **2x retry** jika JSON ditolak atau terjadi `ThrottlingException`.
+- **Fallback deterministik** hanya aktif jika semua percobaan Bedrock gagal, dan **selalu** menandai `is_fallback: true` — ditampilkan juga pada kartu Telegram dan audit trail, sehingga angka turunan aturan internal tidak pernah disamarkan sebagai output model.
 
 ---
 
-## 📁 Struktur Direktori Repositori
+## 📦 Katalog Pilot — Toko Almadina Sembako
 
-```text
-AutoReplenish.ai/
-├── backend/                       # Source code backend production (AWS Lambda / Cloud)
-│   ├── src/
-│   │   ├── config.py              # Konfigurasi aplikasi & logging
-│   │   ├── handlers/              # Lambda event handlers
-│   │   ├── models/                # Pydantic data schemas
-│   │   └── services/              # Bedrock, SAP, Weather, & DynamoDB services
-│   └── requirements.txt
-│
-├── dashboard/                     # Web Control Center Dashboard (React + Vite)
-│   ├── src/
-│   │   ├── components/            # Reusable UI (Navbar, Sidebar, StatCard, RiskBadge, JsonModal)
-│   │   ├── pages/                 # 4 Modul Dashboard
-│   │   └── services/api.js        # Connector REST API
-│   ├── package.json
-│   └── vite.config.js
-│
-├── demo/                          # 🚀 100% Local Demo Environment (No Cloud / No AWS required)
-│   ├── .env.example               # Template environment variables
-│   ├── .env                       # Local active config
-│   ├── db/
-│   │   └── demo.db                # SQLite database (replaces DynamoDB)
-│   ├── services/
-│   │   ├── local_db.py            # SQLite database layer
-│   │   ├── mock_bedrock.py        # Claude 3.5 Sonnet deterministic reasoning
-│   │   ├── mock_sap.py            # Mock SAP S/4HANA PR generator & idempotency
-│   │   ├── mock_weather.py        # Mock OpenWeatherMap per zone
-│   │   └── telegram_bot.py        # Real Telegram Bot API client
-│   ├── scripts/
-│   │   ├── 00_check_setup.py      # Pre-flight diagnostic tool
-│   │   ├── 01_init_db.py          # Create SQLite tables
-│   │   ├── 02_seed_demo.py        # Seed 3 pilot stores, 4 SKUs, & inventory
-│   │   ├── 03_run_pipeline.py     # Trigger AI orchestration pipeline
-│   │   ├── 04_telegram_listener.py# Telegram interactive button callback listener
-│   │   ├── 05_dashboard_api.py    # FastAPI local REST API (Port 8000)
-│   │   └── 06_verify_sync.py      # Automated 4-layer synchronization test
-│   └── README_DEMO.md             # Panduan lengkap presentasi demo lokal
-│
-├── infra/                         # Infrastructure as Code (Terraform)
-│   ├── main.tf                    # AWS Lambda, DynamoDB, EventBridge, IAM definitions
-│   └── variables.tf
-│
-├── tests/                         # Automated unit & integration test suite
-└── README.md                      # Dokumentasi utama proyek
-```
+| SKU | Nama | Kategori | MOQ | Kemasan | Satuan | Shelf Life | Lead Time |
+| :--- | :--- | :--- | ---: | ---: | :--- | ---: | ---: |
+| SKU-ALM-001 | Beras Medium Premium 5kg | Non-Perishable | 5 karung | 5 | KARUNG | 365h | 3h |
+| SKU-ALM-002 | Minyak Goreng Sawit 1L | Non-Perishable | 12 pouch (1 kardus) | 12 | POUCH | 270h | 2h |
+| SKU-ALM-003 | Telur Ayam Ras Segar 1kg | Perishable, **rapuh** | 10 | 10 | KG | 14h | **1h** |
+| SKU-ALM-004 | Roti Basah Tradisional / Kue Pangan 100g | Perishable, **rapuh** | 12 | 12 | PCS | **3h** | 1h |
+| SKU-ALM-005 | Gula Pasir Kristal Putih 1kg | Non-Perishable | 20 pcs (1 sak) | 20 | PCS | 730h | 2h |
+
+Katalog ini hanya di-*seed* ketika koleksi DynamoDB masih kosong, sehingga master data produksi dapat ditimpa dari SAP.
 
 ---
 
-## 🚀 Panduan Menjalankan Demo Lokal (Quick Start)
+## 🔒 Integrasi SAP — Dual Mode
 
-Demo lokal ini dapat dijalankan **100% di komputer tanpa akun AWS dan tanpa kartu kredit**.
+| Mode | Kondisi | Perilaku |
+| :--- | :--- | :--- |
+| **LIVE** | Secret SAP berisi `client_id`, `client_secret`, `odata_base_url` | OAuth2 client-credentials → `X-CSRF-Token: Fetch` → POST deep-insert ke `API_PURCHASEREQ_PROCESS_SRV` (timeout 5s, backoff eksponensial, 4xx tidak di-retry) |
+| **PERSISTENT_SANDBOX** | Kredensial kosong | Respons OData `{"d": {...}}` persis bentuknya SAP, nomor PR dari counter atomik DynamoDB, **ledger transaksi persisten di DynamoDB** |
 
-### 1. Prasyarat
-* **Python 3.11+**
-* **Node.js 18+**
-* **Aplikasi Telegram** (Mobile atau Desktop)
-
----
-
-### 2. Setup Konfigurasi `.env`
-
-1. Buat bot baru di Telegram melalui **`@BotFather`** untuk mendapatkan `TELEGRAM_BOT_TOKEN`.
-2. Dapatkan Chat ID akun Anda melalui **`@userinfobot`**.
-3. Buka bot Anda di Telegram dan klik tombol **`START`**.
-4. Buat file `demo/.env` (atau salin dari `demo/.env.example`):
-   ```env
-   TELEGRAM_BOT_TOKEN=token_bot_anda_dari_botfather
-   TELEGRAM_CHAT_ID=chat_id_anda
-   DEMO_MODE=local
-   DASHBOARD_API_PORT=8000
-   ```
+Kedua mode memakai kontrak idempotency yang sama: ledger diperiksa sebelum mutasi sehingga tombol yang di-klik dua Kali atau pesan SQS yang di-retry tidak mungkin membuat PR ganda.
 
 ---
 
-### 3. Instalasi Dependensi
+## 🛡️ Keamanan & Kepatuhan
+
+- **Tidak ada rahasia di repositori.** Kredensial OWM/Telegram/SAP berasal dari Secrets Manager; Terraform memakai variabel `sensitive` tanpa nilai default.
+- **Webhook Telegram** divalidasi melalui header `X-Telegram-Bot-Api-Secret-Token`.
+- **IAM least-privilege**: satu role per Lambda; Dashboard API hanya diberi `dynamodb:GetItem`, `Query`, `kms:Decrypt`.
+- **DynamoDB**: enkripsi KMS, PITR, TTL 6 jam pada cache cuaca.
+- **SQS FIFO** dengan `MessageDeduplicationId = request_id` + redrive ke DLQ (3 percobaan).
+- **Dashboard tidak pernah menampilkan data yang dikarang.** Jika backend tidak dapat dijangkau, banner degradasi tampil eksplisit.
+
+---
+
+## 🧪 Pengujian
 
 ```bash
-# 1. Install Backend Dependencies
-cd demo
-pip install -r requirements.txt
-
-# 2. Install Frontend Dependencies
-cd ../dashboard
-npm install
+make test
 ```
+
+118 *tests* berjalan sepenuhnya lokal melalui **moto** (DynamoDB/SQS/Secrets Manager diemulasi), dengan *double* hanya di batas jaringan (Bedrock, OpenWeatherMap, Telegram, SAP):
+
+| Berkas | Cakupan |
+| :--- | :--- |
+| `test_dynamodb_service.py` | CRUD boto3 nyata, PK/SK, GSI1, GSI2, cache terbalik, TTL, counter atomik |
+| `test_bedrock_reasoning.py` | Bentuk payload `invoke_model`, retry, fallback ber-flag, guardrail JSON |
+| `test_weather_cache.py` | GET HTTP OpenWeatherMap, pemetaan field, cache hit/miss/expired, degradasi |
+| `test_telegram_service.py` | `sendMessage` / `answerCallbackQuery` / `editMessageText`, kegagalan tidak melempar |
+| `test_sap_integration.py` | Dual-mode, OAuth2, CSRF, idempotency lintas *cold start* |
+| `test_end_to_end_flow.py` | EventBridge → Bedrock → Telegram → SAP → audit trail |
+| `test_telegram_state_machine.py` | Alpercapan callback, free-text, timeout, double-click, webhook secret |
+| `test_sku_prioritization.py` | 9 kriteria prioritas pada katalog almadan |
+| `test_moq_packaging.py` | Pembulatan konservatif untuk perishable/rapuh |
 
 ---
 
-### 4. Menjalankan Demo (4 Langkah Sederhana)
+## 📄 Lisensi
 
-Buka terminal terpisah untuk menjalankan service:
-
-#### **Terminal 1: Inisialisasi Database & Jalankan REST API**
-```bash
-cd demo
-python scripts/01_init_db.py
-python scripts/02_seed_demo.py
-python scripts/05_dashboard_api.py
-```
-> *API aktif di `http://localhost:8000` (Swagger Docs: `http://localhost:8000/docs`)*
-
-#### **Terminal 2: Jalankan Telegram Interactive Listener**
-```bash
-cd demo
-python scripts/04_telegram_listener.py
-```
-> *Mendengarkan klik tombol Approve / Edit / Reject dari Telegram secara real-time.*
-
-#### **Terminal 3: Jalankan React Dashboard UI**
-```bash
-cd dashboard
-npm run dev
-```
-> *Buka browser di `http://localhost:3000`.*
-
-#### **Terminal 4: Trigger Evaluasi AI Pipeline (Saat Demo/Presentasi)**
-```bash
-cd demo
-python scripts/03_run_pipeline.py
-```
-> *Sistem langsung mengirimkan kartu rekomendasi interaktif ke aplikasi Telegram Anda.*
-
----
-
-## 🧪 Validasi Sinkronisasi Otomatis
-
-Untuk memastikan seluruh layer data (Telegram Listener ➔ SQLite ➔ FastAPI ➔ React UI) tersinkronisasi 100%, jalankan:
-
-```bash
-cd demo
-python scripts/06_verify_sync.py
-```
-
-**Hasil Pengujian:**
-```text
-============================================================
-🔍 AUTOREPLENISH.AI — Data Synchronization Verification
-============================================================
-
-Layer A: Telegram Listener → SQLite
-[✅] APPROVE writes to SQLite correctly
-[✅] EDIT writes to SQLite correctly
-[✅] REJECT writes to SQLite correctly
-[✅] Database path is consistent
-
-Layer B: SQLite → Dashboard API
-[✅] /audit-logs returns all records
-[✅] /audit-logs/{id} returns full trace
-[✅] /sap-monitor returns correct PR counts
-[✅] /feedback-analytics returns correct stats
-[✅] Database path is consistent
-
-Layer C: Dashboard API → Dashboard UI
-[✅] api.js points to http://localhost:8000
-[✅] Mock fallback is disabled or explicit
-[✅] Page components fetch from API (not hardcoded)
-[✅] Field names match between API and components
-
-Layer D: CORS and Connectivity
-[✅] CORS is enabled
-[✅] No port conflicts
-[✅] No proxy misconfiguration
-
-============================================================
-RESULT: ALL PASSED
-============================================================
-```
-
----
-
-## 🛡️ Keamanan & Kepatuhan Enterprise
-
-* **No Hardcoded Secrets:** Seluruh kredensial dikelola melalui variabel *environment* `.env` (atau AWS Secrets Manager saat *production*).
-* **Strict Idempotency Guard:** Mencegah penerbitan *Purchase Requisition* ganda di SAP saat terjadi *double-click* atau *network retry*.
-* **Explainable AI (XAI):** Setiap rekomendasi AI memiliki riwayat jejak audit lengkap (*input payload*, *prompt version*, *reasoning text*, dan *timestamp*).
-
----
-
-## 📄 Lisensi & Kontributor
-
-Dikembangkan sebagai solusi **Agentic AI Supply Chain Optimization** untuk jaringan ritel modern.
-
-* **Lisensi:** MIT License
-* **Versi Prompt AI:** `v1.0`
-* **Model AI Utama:** Anthropic Claude 3.5 Sonnet via AWS Bedrock
+MIT License · Prompt AI `v1.0` · Model utama: Claude 3.5 Sonnet via AWS Bedrock

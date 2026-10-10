@@ -1,157 +1,287 @@
 /**
  * Dashboard API Connector for AutoReplenish.ai.
- * Connects to live FastAPI Backend (http://localhost:8000).
+ *
+ * Connects to live production/demo backend:
+ *   - Local server    -> http://localhost:8000  (demo/scripts/05_dashboard_api.py)
+ *   - AWS deployment  -> https://<api-id>.execute-api.<region>.amazonaws.com
+ *                        (API Gateway -> dashboard_api Lambda)
+ *
+ * CRITICAL RULE: Zero silent mocks. If the backend is unreachable or returns an error,
+ * this connector throws explicit errors so the UI displays transparent degraded-state
+ * banners and error diagnostics instead of fabricating fake data.
  */
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000').replace(/\/$/, '');
+
+// API Gateway base URLs include `/api/v1`; local FastAPI servers accept both direct and prefixed routes.
+const isApiGateway = API_BASE_URL.includes('execute-api');
+const API_PREFIX = (isApiGateway ? '/api/v1' : (import.meta.env.VITE_API_PREFIX || '')).replace(/\/$/, '');
+
+export const apiConfig = {
+  baseUrl: API_BASE_URL,
+  prefix: API_PREFIX,
+  isApiGateway,
+};
+
+/**
+ * Last connection failure snapshot for reactive banners and status components.
+ */
+let lastApiError = null;
+
+export function getLastApiError() {
+  return lastApiError;
+}
+
+function url(path) {
+  // Prevent double slashes when joining
+  const cleanPath = path.startsWith('/') ? path : `/${path}`;
+  if (API_PREFIX && cleanPath.startsWith(API_PREFIX)) {
+    return `${API_BASE_URL}${cleanPath}`;
+  }
+  return `${API_BASE_URL}${API_PREFIX}${cleanPath}`;
+}
+
+function fail(endpoint, status, message, method = 'GET') {
+  lastApiError = { endpoint, status, message, method, timestamp: new Date().toISOString() };
+  console.error(`[API Error] ${method} ${endpoint} -> ${message}`);
+  return new Error(message);
+}
+
+async function request(path, options = {}) {
+  lastApiError = null;
+  const method = options.method || 'GET';
+  const startedAt = performance.now();
+
+  try {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('ar_token') : null;
+    const authHeaders = token ? { Authorization: `Bearer ${token}` } : {};
+
+    const fetchOptions = {
+      method,
+      headers: {
+        Accept: 'application/json',
+        ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+        ...authHeaders,
+        ...options.headers,
+      },
+    };
+
+    if (options.body) {
+      fetchOptions.body = typeof options.body === 'string' ? options.body : JSON.stringify(options.body);
+    }
+
+    const res = await fetch(url(path), fetchOptions);
+
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '');
+      throw fail(
+        path,
+        res.status,
+        `HTTP ${res.status} ${res.statusText}${detail ? ` - ${detail.slice(0, 200)}` : ''}`,
+        method
+      );
+    }
+
+    const payload = await res.json();
+    return { data: payload, latencyMs: Math.round(performance.now() - startedAt) };
+  } catch (e) {
+    if (!lastApiError) {
+      throw fail(path, 0, `Tidak dapat menghubungi ${API_BASE_URL} - ${e.message}`, method);
+    }
+    throw e;
+  }
+}
 
 export const api = {
-  async getStores() {
-    try {
-      const res = await fetch(`${API_BASE_URL}/stores`);
-      if (res.ok) {
-        return await res.json();
-      }
-      console.error(`[API Error] GET /stores responded with status ${res.status}`);
-    } catch (e) {
-      console.error(`[API Connection Error] Failed to fetch /stores from ${API_BASE_URL}:`, e);
-    }
-    // Fallback if backend is not running
-    return [
-      { store_id: 'STR-001', store_name: 'Cabang Sudirman', area_type: 'Perkantoran', zone: 'JAKARTA_PUSAT', active: true },
-      { store_id: 'STR-002', store_name: 'Cabang Kemang', area_type: 'Perumahan', zone: 'JAKARTA_SELATAN', active: true },
-      { store_id: 'STR-003', store_name: 'Cabang UI Depok', area_type: 'Kampus', zone: 'DEPOK', active: true }
-    ];
+  /** Authentication login */
+  async login(credentials) {
+    const { data } = await request('/api/v1/auth/login', {
+      method: 'POST',
+      body: credentials,
+    });
+    return data;
   },
 
-  async getStoreInventoryHealth(storeId = 'STR-001') {
-    try {
-      const res = await fetch(`${API_BASE_URL}/stores/${storeId}/inventory-health`);
-      if (res.ok) {
-        return await res.json();
-      }
-      console.error(`[API Error] GET /stores/${storeId}/inventory-health responded with status ${res.status}`);
-    } catch (e) {
-      console.error(`[API Connection Error] Failed to fetch inventory health from ${API_BASE_URL}:`, e);
-    }
-    // Fallback if backend is not running
-    return {
-      store_id: storeId,
-      store_name: storeId === 'STR-001' ? 'Cabang Sudirman' : storeId === 'STR-002' ? 'Cabang Kemang' : 'Cabang UI Depok',
-      area_type: storeId === 'STR-001' ? 'Perkantoran' : storeId === 'STR-002' ? 'Perumahan' : 'Kampus',
-      zone: storeId === 'STR-001' ? 'JAKARTA_PUSAT' : storeId === 'STR-002' ? 'JAKARTA_SELATAN' : 'DEPOK',
-      summary: {
-        total_skus: 4,
-        stockout_risk: 2,
-        overstock_risk: 1,
-        healthy: 1
-      },
-      inventory: [
-        {
-          sku_id: 'SKU-10023',
-          sku_name: 'Roti Manis Cokelat 100g',
-          category: 'Perishable',
-          weather_sensitive: true,
-          physical_stock: 12,
-          threshold: 20,
-          average_daily_burn_rate: 25.0,
-          lead_time_days: 2,
-          status: 'STOCKOUT_RISK',
-          days_of_supply: 0.5
-        },
-        {
-          sku_id: 'SKU-20045',
-          sku_name: 'Air Mineral 600ml',
-          category: 'Non-Perishable',
-          weather_sensitive: true,
-          physical_stock: 18,
-          threshold: 30,
-          average_daily_burn_rate: 40.0,
-          lead_time_days: 1,
-          status: 'STOCKOUT_RISK',
-          days_of_supply: 0.5
-        },
-        {
-          sku_id: 'SKU-30067',
-          sku_name: 'Susu UHT Full Cream 1L',
-          category: 'Perishable',
-          weather_sensitive: false,
-          physical_stock: 35,
-          threshold: 15,
-          average_daily_burn_rate: 10.0,
-          lead_time_days: 3,
-          status: 'HEALTHY',
-          days_of_supply: 3.5
-        }
-      ]
-    };
+  /** Get current authenticated user profile */
+  async getMe() {
+    const { data } = await request('/api/v1/auth/me');
+    return data;
   },
 
+  /** Health probe used by the UI banner */
+  async health() {
+    return api.getRaw('/health');
+  },
+
+  /** Integration diagnostic ping (AWS Bedrock, OpenWeatherMap, Telegram, SAP, POS) */
+  async getIntegrationHealth() {
+    const { data } = await request('/api/v1/health/integrations');
+    return data;
+  },
+
+  /** Raw GET for endpoints that return non-JSON or raw error bodies */
+  async getRaw(path) {
+    lastApiError = null;
+    const res = await fetch(url(path));
+    if (!res.ok) {
+      throw fail(path, res.status, `HTTP ${res.status} ${res.statusText}`, 'GET');
+    }
+    return res.json();
+  },
+
+  /** Retrieve list of retail stores from master DB */
+  async getStores(activeOnly = false) {
+    const qs = activeOnly ? '?active_only=true' : '?active_only=false';
+    const { data } = await request(`/stores${qs}`);
+    return Array.isArray(data) ? data : (data?.data ?? []);
+  },
+
+  /** Register new store */
+  async addStore(storeData) {
+    const { data } = await request('/stores', {
+      method: 'POST',
+      body: storeData,
+    });
+    return data;
+  },
+
+  /** Update existing store profile */
+  async updateStore(storeId, storeData) {
+    const { data } = await request(`/stores/${encodeURIComponent(storeId)}`, {
+      method: 'PUT',
+      body: storeData,
+    });
+    return data;
+  },
+
+  /** Trigger live end-to-end evaluation pipeline on-demand */
+  async triggerEvaluation(storeId) {
+    const { data } = await request(`/api/v1/evaluate/${encodeURIComponent(storeId)}`, {
+      method: 'POST',
+    });
+    return data;
+  },
+
+  /** Inventory health summary and item details for a specific store */
+  async getStoreInventoryHealth(storeId = 'STR-COMMERCIAL-01') {
+    const { data } = await request(`/stores/${encodeURIComponent(storeId)}/inventory-health`);
+    return data;
+  },
+
+  /** Audit log history */
   async getAuditLogs(params = {}) {
-    try {
-      const qs = new URLSearchParams(params).toString();
-      const url = `${API_BASE_URL}/audit-logs${qs ? `?${qs}` : ''}`;
-      const res = await fetch(url);
-      if (res.ok) {
-        const data = await res.json();
-        return Array.isArray(data) ? data : (data.recommendations || []);
-      }
-      console.error(`[API Error] GET /audit-logs responded with status ${res.status}`);
-    } catch (e) {
-      console.error(`[API Connection Error] Failed to fetch audit logs from ${API_BASE_URL}:`, e);
-    }
-    // Fallback if backend is not running
-    return [];
+    const qs = new URLSearchParams(params).toString();
+    const { data } = await request(`/audit-logs${qs ? `?${qs}` : ''}`);
+    return Array.isArray(data) ? data : (data?.recommendations ?? data?.data ?? []);
   },
 
+  /** Detailed AI reasoning trace for a specific replenishment request */
+  async getAuditLogDetail(requestId) {
+    if (!requestId) throw new Error('requestId is required');
+    const { data } = await request(`/audit-logs/${encodeURIComponent(requestId)}`);
+    return data;
+  },
+
+  /** Live SAP connection status & Purchase Requisitions created */
   async getSapMonitor() {
-    try {
-      const res = await fetch(`${API_BASE_URL}/sap-monitor`);
-      if (res.ok) {
-        return await res.json();
-      }
-      console.error(`[API Error] GET /sap-monitor responded with status ${res.status}`);
-    } catch (e) {
-      console.error(`[API Connection Error] Failed to fetch SAP monitor from ${API_BASE_URL}:`, e);
-    }
-    // Fallback if backend is not running
-    return {
-      connection_status: 'ONLINE',
-      sap_host: 'sap-s4hana.enterprise.corp:443',
-      odata_endpoint: '/sap/opu/odata/sap/API_PURCHASEREQ_PROCESS_SRV',
-      average_latency_ms: 42,
-      metrics: {
-        total_pr_generated: 0,
-        total_pr_failed: 0,
-        success_rate_pct: 100.0,
-        active_retry_queue_size: 0,
-        dlq_message_count: 0
-      },
-      recent_transactions: []
-    };
+    const { data } = await request('/sap-monitor');
+    return data;
   },
 
+  /** Human feedback and managerial override loop analytics */
   async getFeedbackAnalytics() {
-    try {
-      const res = await fetch(`${API_BASE_URL}/feedback-analytics`);
-      if (res.ok) {
-        return await res.json();
-      }
-      console.error(`[API Error] GET /feedback-analytics responded with status ${res.status}`);
-    } catch (e) {
-      console.error(`[API Connection Error] Failed to fetch feedback analytics from ${API_BASE_URL}:`, e);
-    }
-    // Fallback if backend is not running
-    return {
-      metrics: {
-        total_recommendations: 0,
-        approval_rate_pct: 0.0,
-        rejection_rate_pct: 0.0,
-        edit_rate_pct: 0.0,
-        timeout_count: 0
-      },
-      top_rejection_reasons: [],
-      recent_feedback_records: []
-    };
-  }
+    const { data } = await request('/feedback-analytics');
+    return data;
+  },
+
+  /** Get full store operational settings (5 modules) */
+  async getStoreSettings(storeId) {
+    if (!storeId) throw new Error('storeId is required');
+    const { data } = await request(`/stores/${encodeURIComponent(storeId)}/settings`);
+    return data;
+  },
+
+  /** Update store operational settings (metadata, ingestion, hitl) */
+  async updateStoreSettings(storeId, settings) {
+    if (!storeId) throw new Error('storeId is required');
+    const { data } = await request(`/stores/${encodeURIComponent(storeId)}/settings`, {
+      method: 'PUT',
+      body: settings,
+    });
+    return data;
+  },
+
+  /** Get SKU procurement rules for a store */
+  async getStoreSkus(storeId) {
+    if (!storeId) throw new Error('storeId is required');
+    const { data } = await request(`/stores/${encodeURIComponent(storeId)}/skus`);
+    return Array.isArray(data) ? data : (data?.data ?? []);
+  },
+
+  /** Update procurement rule for a specific SKU */
+  async updateStoreSku(storeId, skuId, ruleData) {
+    if (!storeId || !skuId) throw new Error('storeId and skuId are required');
+    const { data } = await request(`/stores/${encodeURIComponent(storeId)}/skus/${encodeURIComponent(skuId)}`, {
+      method: 'PUT',
+      body: ruleData,
+    });
+    return data;
+  },
+
+  /** Add active promotional event for a store */
+  async addStorePromo(storeId, promoData) {
+    if (!storeId) throw new Error('storeId is required');
+    const { data } = await request(`/stores/${encodeURIComponent(storeId)}/promos`, {
+      method: 'POST',
+      body: promoData,
+    });
+    return data;
+  },
+
+  /** Delete promotional event from a store */
+  async deleteStorePromo(storeId, promoId) {
+    if (!storeId || !promoId) throw new Error('storeId and promoId are required');
+    const { data } = await request(`/stores/${encodeURIComponent(storeId)}/promos/${encodeURIComponent(promoId)}`, {
+      method: 'DELETE',
+    });
+    return data;
+  },
+
+  /** Add local community event for a store */
+  async addStoreEvent(storeId, eventData) {
+    if (!storeId) throw new Error('storeId is required');
+    const { data } = await request(`/stores/${encodeURIComponent(storeId)}/events`, {
+      method: 'POST',
+      body: eventData,
+    });
+    return data;
+  },
+
+  /** Delete local community event from a store */
+  async deleteStoreEvent(storeId, eventId) {
+    if (!storeId || !eventId) throw new Error('storeId and eventId are required');
+    const { data } = await request(`/stores/${encodeURIComponent(storeId)}/events/${encodeURIComponent(eventId)}`, {
+      method: 'DELETE',
+    });
+    return data;
+  },
+
+  /** Test ping to store manager Telegram chat */
+  async testTelegramIntegration(payload) {
+    const { data } = await request('/integrations/test-telegram', {
+      method: 'POST',
+      body: payload,
+    });
+    return data;
+  },
+
+  /** Test handshake and OData metadata ping to SAP S/4HANA */
+  async testSapIntegration(payload) {
+    const { data } = await request('/integrations/test-sap', {
+      method: 'POST',
+      body: payload,
+    });
+    return data;
+  },
 };
+

@@ -1,117 +1,250 @@
-"""Unit Tests for Telegram State Machine and Idempotency (PRD Section 11.8 & 15.6)."""
+"""Telegram State Machine & Human-in-the-Loop tests (PRD Section 11.7, 11.8, 15.6).
 
-import sys
+Focused on the webhook processor: callback acknowledgement ordering, free-text
+conversation flows, duplicate-click protection, expiry, and audit finalisation.
+"""
+
 import os
+import sys
+import json
 import unittest
+from datetime import datetime, timezone, timedelta
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "backend")))
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__))))
 
-from datetime import datetime, timezone, timedelta
+from conftest import (
+    moto_dynamo_table,
+    FakeHTTPClient,
+    telegram_ok_response,
+    sku_perishable_fragile,
+    TEST_TABLE_NAME,
+)
 from src.services.dynamodb_service import DynamoDBService
 from src.services.sap_service import SapIntegrationService
-from src.handlers.telegram_webhook_handler import TelegramWebhookProcessor
-from src.models.schema import TelegramStateRecord, SKUProfile
+from src.services.telegram_service import TelegramService
+from src.handlers.telegram_webhook_handler import TelegramWebhookProcessor, _verify_webhook_secret
+from src.models.schema import TelegramStateRecord, AWAITING_QTY, AWAITING_REJECT_REASON
 
-class TestTelegramStateMachine(unittest.TestCase):
+
+class TelegramStateMachineTestBase(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls._ctx = moto_dynamo_table()
+        cls.table = cls._ctx.__enter__()
+        cls.db = DynamoDBService(table_name=TEST_TABLE_NAME, client=cls.table)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._ctx.__exit__(None, None, None)
 
     def setUp(self):
-        self.db = DynamoDBService()
-        self.sap = SapIntegrationService()
-        self.processor = TelegramWebhookProcessor(self.db, self.sap)
+        for item in self.table.scan().get("Items", []):
+            self.table.delete_item(Key={"PK": item["PK"], "SK": item["SK"]})
 
-        # Register sample SKU
-        self.db.put_sku(SKUProfile(
-            sku_id="SKU-10023",
-            sku_name="Roti Manis Cokelat",
-            category="Perishable",
-            moq=12,
-            packaging_multiple=12
-        ))
+    def _dispatch(self, http=None):
+        telegram = TelegramService(bot_token="T", http_client=http or FakeHTTPClient([]))
+        return TelegramWebhookProcessor(self.db, telegram_service=telegram), telegram
 
-        # Create sample Telegram pending state
-        self.request_id = "REQ-TEST-001"
-        now_dt = datetime.now(timezone.utc)
-        self.state = TelegramStateRecord(
-            PK=f"REQ#{self.request_id}",
-            SK="STATE",
-            request_id=self.request_id,
-            run_id="RUN-TEST-001",
-            store_id="STR-001",
-            sku_id="SKU-10023",
-            recommended_qty=15,
-            status="PENDING_APPROVAL",
-            telegram_chat_id="chat_001",
-            created_at=now_dt.isoformat(),
-            expires_at=(now_dt + timedelta(hours=4)).isoformat()
+    def _create_state(self, request_id="REQ-SM-0001", status="PENDING_APPROVAL"):
+        now = datetime.now(timezone.utc)
+        state = TelegramStateRecord(
+            request_id=request_id,
+            run_id="RUN-SM-0001",
+            store_id="STR-ALMADINA-001",
+            sku_id="SKU-ALM-003",
+            recommended_qty=20,
+            telegram_chat_id="1181431005",
+            telegram_message_id="555",
+            created_at=now.isoformat(),
+            expires_at=(now + timedelta(hours=4)).isoformat(),
+            status=status,
         )
-        self.db.put_telegram_state(self.state)
+        self.db.put_telegram_state(state)
+        return state
 
-    def test_approve_creates_sap_pr(self):
-        """Approve transition creates SAP PR and updates state to PR_CREATED."""
-        res = self.processor.handle_callback_query(f"APPROVE:{self.request_id}")
-        self.assertEqual(res["status"], "success")
-        self.assertIn("PR-", res["sap_pr_id"])
 
-        updated_state = self.db.get_telegram_state(self.request_id)
-        self.assertEqual(updated_state.status, "PR_CREATED")
-        self.assertEqual(updated_state.sap_pr_id, res["sap_pr_id"])
+class TestCallbackHandling(TelegramStateMachineTestBase):
 
-    def test_duplicate_click_prevention(self):
-        """Duplicate approve clicks return already_processed without creating second PR."""
-        # First click
-        res1 = self.processor.handle_callback_query(f"APPROVE:{self.request_id}")
-        self.assertEqual(res1["status"], "success")
+    def test_answer_callback_query_is_sent_first(self):
+        http = FakeHTTPClient([telegram_ok_response() for _ in range(5)])
+        processor, _ = self._dispatch(http)
+        self._create_state()
 
-        # Second click
-        res2 = self.processor.handle_callback_query(f"APPROVE:{self.request_id}")
-        self.assertEqual(res2["status"], "already_processed")
+        processor.handle_callback_query("APPROVE:REQ-SM-0001", callback_query_id="cb-1")
 
-    def test_rejection_stores_feedback_and_cancels_pr(self):
-        """Reject callback stores feedback reason and sets state to REJECTED."""
-        res = self.processor.handle_rejection(self.request_id, "Stok fisik di toko masih mencukupi")
-        self.assertEqual(res["status"], "rejected")
+        # The very first outbound Bot API call must be answerCallbackQuery.
+        self.assertEqual(http.calls[0]["url"].split("/")[-1], "answerCallbackQuery")
+        self.assertEqual(http.calls[0]["json"]["callback_query_id"], "cb-1")
 
-        updated_state = self.db.get_telegram_state(self.request_id)
-        self.assertEqual(updated_state.status, "REJECTED")
+    def test_edit_prompt_updates_card_and_waits_for_input(self):
+        http = FakeHTTPClient([telegram_ok_response() for _ in range(4)])
+        processor, _ = self._dispatch(http)
+        self._create_state()
 
-        # Verify feedback in DynamoDB
-        feedbacks = self.db.list_recent_feedback("STR-001", "SKU-10023")
-        self.assertEqual(len(feedbacks), 1)
-        self.assertEqual(feedbacks[0].reason, "Stok fisik di toko masih mencukupi")
+        result = processor.handle_callback_query("EDIT:REQ-SM-0001", callback_query_id="cb-2")
 
-    def test_manual_qty_edit_flow(self):
-        """Edit qty validates multiples and executes PR with adjusted qty."""
-        res = self.processor.handle_manual_qty_edit(self.request_id, new_qty=24)
-        self.assertEqual(res["status"], "success")
+        self.assertEqual(result["status"], "edit_prompt")
+        state = self.db.get_telegram_state("REQ-SM-0001")
+        self.assertEqual(state.awaiting_input, AWAITING_QTY)
+        self.assertEqual(self.db.get_chat_pending_request("1181431005"), "REQ-SM-0001")
 
-        updated_state = self.db.get_telegram_state(self.request_id)
-        self.assertEqual(updated_state.final_qty, 24)
+    def test_reject_prompt_waits_for_reason_input(self):
+        http = FakeHTTPClient([telegram_ok_response() for _ in range(4)])
+        processor, _ = self._dispatch(http)
+        self._create_state()
+        result = processor.handle_callback_query("REJECT:REQ-SM-0001", callback_query_id="cb-3")
+        self.assertEqual(result["status"], "reject_prompt")
+        state = self.db.get_telegram_state("REQ-SM-0001")
+        self.assertEqual(state.awaiting_input, AWAITING_REJECT_REASON)
 
-    def test_timeout_expiration_blocks_action(self):
-        """Expired state (>4h) transitions to TIMEOUT and blocks PR creation."""
-        expired_req_id = "REQ-EXPIRED-001"
-        past_dt = datetime.now(timezone.utc) - timedelta(hours=5)
-        expired_state = TelegramStateRecord(
-            PK=f"REQ#{expired_req_id}",
-            SK="STATE",
-            request_id=expired_req_id,
-            run_id="RUN-TEST-001",
-            store_id="STR-001",
-            sku_id="SKU-10023",
-            recommended_qty=15,
-            status="PENDING_APPROVAL",
-            telegram_chat_id="chat_001",
-            created_at=(past_dt - timedelta(hours=1)).isoformat(),
-            expires_at=past_dt.isoformat()
+    def test_free_text_qty_reply_completes_the_flow(self):
+        http = FakeHTTPClient([telegram_ok_response() for _ in range(6)])
+        processor, _ = self._dispatch(http)
+        self._create_state()
+        self.db.put_sku(sku_perishable_fragile())
+
+        processor.handle_callback_query("EDIT:REQ-SM-0001", callback_query_id="cb-2")
+        result = processor.handle_update({"message": {
+            "chat": {"id": 1181431005},
+            "text": "40",
+        }})
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(self.db.get_telegram_state("REQ-SM-0001").final_qty, 40)
+        # The pending pointer must be released once the conversation ends.
+        self.assertIsNone(self.db.get_chat_pending_request("1181431005"))
+
+    def test_non_numeric_qty_reply_is_rejected(self):
+        http = FakeHTTPClient([telegram_ok_response() for _ in range(6)])
+        processor, _ = self._dispatch(http)
+        self._create_state()
+
+        processor.handle_callback_query("EDIT:REQ-SM-0001", callback_query_id="cb-2")
+        result = processor.handle_update({"message": {"chat": {"id": 1181431005}, "text": "banyak"}})
+
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(
+            self.db.get_telegram_state("REQ-SM-0001").awaiting_input, AWAITING_QTY
         )
-        self.db.put_telegram_state(expired_state)
 
-        res = self.processor.handle_callback_query(f"APPROVE:{expired_req_id}")
-        self.assertEqual(res["status"], "timeout")
+    def test_free_text_rejection_reason_is_recorded(self):
+        http = FakeHTTPClient([telegram_ok_response() for _ in range(6)])
+        processor, _ = self._dispatch(http)
+        self._create_state()
 
-        final_state = self.db.get_telegram_state(expired_req_id)
-        self.assertEqual(final_state.status, "TIMEOUT")
+        processor.handle_callback_query("REJECT:REQ-SM-0001", callback_query_id="cb-3")
+        result = processor.handle_update({"message": {
+            "chat": {"id": 1181431005},
+            "text": "Toko tutup lebih awal karena ada acara desa",
+        }})
+
+        self.assertEqual(result["status"], "rejected")
+        state = self.db.get_telegram_state("REQ-SM-0001")
+        self.assertEqual(state.status, "REJECTED")
+        self.assertIn("acara desa", state.rejection_reason)
+
+    def test_duplicate_approve_is_blocked(self):
+        http = FakeHTTPClient([telegram_ok_response() for _ in range(8)])
+        processor, _ = self._dispatch(http)
+        self._create_state()
+
+        first = processor.handle_callback_query("APPROVE:REQ-SM-0001", callback_query_id="cb-1")
+        second = processor.handle_callback_query("APPROVE:REQ-SM-0001", callback_query_id="cb-1")
+
+        self.assertEqual(first["status"], "success")
+        self.assertEqual(second["status"], "already_processed")
+        self.assertEqual(len(self.db.list_sap_transactions()), 1)
+
+    def test_expired_request_rejects_approval(self):
+        http = FakeHTTPClient([telegram_ok_response() for _ in range(5)])
+        processor, _ = self._dispatch(http)
+        state = self._create_state()
+        state.expires_at = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
+        self.db.put_telegram_state(state)
+
+        result = processor.handle_callback_query("APPROVE:REQ-SM-0001", callback_query_id="cb-1")
+        self.assertEqual(result["status"], "timeout")
+        self.assertEqual(self.db.get_telegram_state("REQ-SM-0001").status, "TIMEOUT")
+        self.assertIsNone(self.db.get_sap_transaction("REQ-SM-0001"))
+
+    def test_unknown_request_is_handled_without_error(self):
+        processor, _ = self._dispatch(FakeHTTPClient([telegram_ok_response()]))
+        result = processor.handle_callback_query("APPROVE:REQ-NOPE", callback_query_id="cb")
+        self.assertEqual(result["status"], "error")
+        self.assertIn("not found", result["message"])
+
+    def test_malformed_callback_data(self):
+        processor, _ = self._dispatch(FakeHTTPClient([telegram_ok_response()]))
+        result = processor.handle_callback_query("GARBAGE", callback_query_id="cb")
+        self.assertEqual(result["status"], "error")
+
+    def test_unknown_action(self):
+        http = FakeHTTPClient([telegram_ok_response() for _ in range(3)])
+        processor, _ = self._dispatch(http)
+        self._create_state()
+        result = processor.handle_callback_query("MAYBE:REQ-SM-0001", callback_query_id="cb")
+        self.assertEqual(result["status"], "error")
+        self.assertIn("tidak dikenal", result["message"])
+
+    def test_chat_pointer_ttl_release_after_rejection(self):
+        http = FakeHTTPClient([telegram_ok_response() for _ in range(6)])
+        processor, _ = self._dispatch(http)
+        self._create_state()
+        processor.handle_callback_query("REJECT:REQ-SM-0001", callback_query_id="cb-3")
+        processor.handle_update({"message": {"chat": {"id": 1181431005}, "text": "Alasan apa pun"}})
+        self.assertIsNone(self.db.get_chat_pending_request("1181431005"))
+
+
+class TestWebhookLambdaHandler(TelegramStateMachineTestBase):
+
+    def test_lambda_handler_processes_callback_update(self):
+        self._create_state()
+        telegram = TelegramService(bot_token="T", http_client=FakeHTTPClient([telegram_ok_response() for _ in range(6)]))
+        processor_sap = SapIntegrationService(db_service=self.db)
+
+        import src.handlers.telegram_webhook_handler as handler_module
+        with unittest.mock.patch.object(handler_module, "DynamoDBService", lambda: self.db), \
+             unittest.mock.patch.object(handler_module, "TelegramService", lambda *a, **k: telegram), \
+             unittest.mock.patch.object(handler_module, "SapIntegrationService", lambda *a, **k: processor_sap), \
+             unittest.mock.patch.object(handler_module, "_webhook_secret", lambda: ""):
+            response = handler_module.lambda_handler({
+                "body": json.dumps({
+                    "callback_query": {"id": "cb-9", "data": "APPROVE:REQ-SM-0001",
+                                       "from": {"id": 1181431005}}
+                })
+            }, None)
+
+        self.assertEqual(response["statusCode"], 200)
+        body = json.loads(response["body"])
+        self.assertEqual(body["status"], "success")
+        self.assertEqual(body["actor_user_id"], "1181431005")
+        self.assertEqual(self.db.get_telegram_state("REQ-SM-0001").status, "PR_CREATED")
+
+    def test_lambda_handler_rejects_bad_webhook_secret(self):
+        import src.handlers.telegram_webhook_handler as handler_module
+        with unittest.mock.patch.object(handler_module, "_webhook_secret", lambda: "expected-secret"):
+            response = handler_module.lambda_handler({
+                "headers": {"X-Telegram-Bot-Api-Secret-Token": "wrong"},
+                "body": json.dumps({"callback_query": {"id": "x", "data": "APPROVE:y"}}),
+            }, None)
+        self.assertEqual(response["statusCode"], 403)
+
+    def test_webhook_secret_verification_helpers(self):
+        self.assertTrue(_verify_webhook_secret({"headers": {}}, ""))
+        self.assertTrue(_verify_webhook_secret(
+            {"headers": {"X-Telegram-Bot-Api-Secret-Token": "s"}}, "s"))
+        self.assertTrue(_verify_webhook_secret(
+            {"headers": {"x-telegram-bot-api-secret-token": "s"}}, "s"))
+        self.assertFalse(_verify_webhook_secret(
+            {"headers": {"X-Telegram-Bot-Api-Secret-Token": "nope"}}, "s"))
+
+    def test_lambda_handler_ignores_unactionable_update(self):
+        import src.handlers.telegram_webhook_handler as handler_module
+        with unittest.mock.patch.object(handler_module, "_webhook_secret", lambda: ""):
+            response = handler_module.lambda_handler({"body": json.dumps({})}, None)
+        self.assertEqual(response["statusCode"], 200)
+        self.assertIn("ignored", response["body"])
+
 
 if __name__ == "__main__":
     unittest.main()

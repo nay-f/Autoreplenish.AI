@@ -1,5 +1,5 @@
 import React from 'react';
-import { Layers, FileText, Cpu, MessageSquareHeart, Sparkles } from 'lucide-react';
+import { Layers, FileText, Cpu, MessageSquareHeart, Sparkles, Store } from 'lucide-react';
 
 export function Sidebar({ activeTab, setActiveTab }) {
   const navItems = [
@@ -16,6 +16,13 @@ export function Sidebar({ activeTab, setActiveTab }) {
       subtitle: 'Bedrock Prompts & Audits',
       icon: Sparkles,
       color: 'text-purple-400'
+    },
+    {
+      id: 'store-settings',
+      label: 'Store & Region Settings',
+      subtitle: 'Master Data & Field Test',
+      icon: Store,
+      color: 'text-cyan-400'
     },
     {
       id: 'sap-monitor',
@@ -66,11 +73,11 @@ export function Sidebar({ activeTab, setActiveTab }) {
 
       <div className="mt-auto p-3.5 rounded-xl bg-gradient-to-br from-slate-800/80 to-slate-800/30 border border-slate-700/60 text-xs">
         <div className="font-semibold text-slate-200 flex items-center gap-1.5 mb-1">
-          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
-          Pilot Readiness
+          <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+          Autonomous Scheduler
         </div>
         <p className="text-slate-400 text-[11px] leading-relaxed">
-          3 Pilot branches connected. Next scheduled evaluation at <strong>05:00 WIB</strong>.
+          Evaluasi otomatis berkala aktif setiap <strong>3 jam</strong> (05:00, 08:00, 11:00, dst). Analisa instan dapat dipicu via Telegram atau Store Settings.
         </p>
       </div>
     </aside>

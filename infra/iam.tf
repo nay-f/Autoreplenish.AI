@@ -12,8 +12,32 @@ data "aws_iam_policy_document" "lambda_assume_role" {
   }
 }
 
+locals {
+  # Shared KMS grant needed to read/write the encrypted DynamoDB table.
+  kms_statement = {
+    Effect = "Allow"
+    Action = [
+      "kms:Encrypt",
+      "kms:Decrypt",
+      "kms:GenerateDataKey"
+    ]
+    Resource = aws_kms_key.dynamo_key.arn
+  }
+
+  logging_statement = {
+    Effect = "Allow"
+    Action = [
+      "logs:CreateLogGroup",
+      "logs:CreateLogStream",
+      "logs:PutLogEvents"
+    ]
+    Resource = "arn:aws:logs:*:*:*"
+  }
+}
+
 # -------------------------------------------------------------
 # 1. Orchestrator & Data Processor Lambda Role
+#    DynamoDB + Bedrock + Secrets (Telegram & Weather) + SQS
 # -------------------------------------------------------------
 resource "aws_iam_role" "orchestrator_role" {
   name               = "AutoReplenish-OrchestratorRole-${var.environment}"
@@ -22,26 +46,19 @@ resource "aws_iam_role" "orchestrator_role" {
 
 resource "aws_iam_policy" "orchestrator_policy" {
   name        = "AutoReplenish-OrchestratorPolicy-${var.environment}"
-  description = "Policy for Orchestrator Lambda: DynamoDB, Bedrock, Secrets, and CloudWatch"
+  description = "Policy for Orchestrator Lambda: DynamoDB, Bedrock, Secrets, CloudWatch"
 
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "logs:CreateLogGroup",
-          "logs:CreateLogStream",
-          "logs:PutLogEvents"
-        ]
-        Resource = "arn:aws:logs:*:*:*"
-      },
+      local.logging_statement,
       {
         Effect = "Allow"
         Action = [
           "dynamodb:GetItem",
           "dynamodb:PutItem",
           "dynamodb:UpdateItem",
+          "dynamodb:DeleteItem",
           "dynamodb:Query",
           "dynamodb:Scan",
           "dynamodb:BatchWriteItem"
@@ -51,22 +68,16 @@ resource "aws_iam_policy" "orchestrator_policy" {
           "${aws_dynamodb_table.main_table.arn}/index/*"
         ]
       },
-      {
-        Effect = "Allow"
-        Action = [
-          "kms:Encrypt",
-          "kms:Decrypt",
-          "kms:GenerateDataKey"
-        ]
-        Resource = aws_kms_key.dynamo_key.arn
-      },
+      local.kms_statement,
       {
         Effect = "Allow"
         Action = [
           "bedrock:InvokeModel",
           "bedrock:InvokeModelWithResponseStream"
         ]
-        Resource = "arn:aws:bedrock:*::foundation-model/anthropic.claude-3-5-sonnet*"
+        Resource = [
+          "arn:aws:bedrock:*::foundation-model/anthropic.claude-3-5-sonnet*",
+        ]
       },
       {
         Effect = "Allow"
@@ -75,7 +86,8 @@ resource "aws_iam_policy" "orchestrator_policy" {
         ]
         Resource = [
           aws_secretsmanager_secret.telegram_credentials.arn,
-          aws_secretsmanager_secret.weather_credentials.arn
+          aws_secretsmanager_secret.weather_credentials.arn,
+          aws_secretsmanager_secret.sap_credentials.arn
         ]
       },
       {
@@ -96,6 +108,7 @@ resource "aws_iam_role_policy_attachment" "orchestrator_attach" {
 
 # -------------------------------------------------------------
 # 2. Telegram Webhook Lambda Role
+#    DynamoDB state updates + SQS dispatch + Secrets
 # -------------------------------------------------------------
 resource "aws_iam_role" "telegram_webhook_role" {
   name               = "AutoReplenish-TelegramWebhookRole-${var.environment}"
@@ -109,37 +122,23 @@ resource "aws_iam_policy" "telegram_webhook_policy" {
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "logs:CreateLogGroup",
-          "logs:CreateLogStream",
-          "logs:PutLogEvents"
-        ]
-        Resource = "arn:aws:logs:*:*:*"
-      },
+      local.logging_statement,
       {
         Effect = "Allow"
         Action = [
           "dynamodb:GetItem",
           "dynamodb:PutItem",
           "dynamodb:UpdateItem",
-          "dynamodb:Query"
+          "dynamodb:DeleteItem",
+          "dynamodb:Query",
+          "dynamodb:Scan"
         ]
         Resource = [
           aws_dynamodb_table.main_table.arn,
           "${aws_dynamodb_table.main_table.arn}/index/*"
         ]
       },
-      {
-        Effect = "Allow"
-        Action = [
-          "kms:Encrypt",
-          "kms:Decrypt",
-          "kms:GenerateDataKey"
-        ]
-        Resource = aws_kms_key.dynamo_key.arn
-      },
+      local.kms_statement,
       {
         Effect = "Allow"
         Action = [
@@ -155,10 +154,7 @@ resource "aws_iam_policy" "telegram_webhook_policy" {
         Action = [
           "sqs:SendMessage"
         ]
-        Resource = [
-          aws_sqs_queue.sap_pr_queue.arn,
-          aws_sqs_queue.sap_dlq.arn
-        ]
+        Resource = aws_sqs_queue.sap_pr_queue.arn
       }
     ]
   })
@@ -171,6 +167,7 @@ resource "aws_iam_role_policy_attachment" "telegram_webhook_attach" {
 
 # -------------------------------------------------------------
 # 3. SAP Integration Worker Lambda Role
+#    SQS consume + Secrets Manager + DynamoDB audit updates
 # -------------------------------------------------------------
 resource "aws_iam_role" "sap_worker_role" {
   name               = "AutoReplenish-SapWorkerRole-${var.environment}"
@@ -179,20 +176,12 @@ resource "aws_iam_role" "sap_worker_role" {
 
 resource "aws_iam_policy" "sap_worker_policy" {
   name        = "AutoReplenish-SapWorkerPolicy-${var.environment}"
-  description = "Policy for SAP Worker: SQS, Secrets Manager, DynamoDB Audit Log"
+  description = "Policy for SAP Worker: SQS, Secrets Manager, DynamoDB Transaction Ledger + Audit Log"
 
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "logs:CreateLogGroup",
-          "logs:CreateLogStream",
-          "logs:PutLogEvents"
-        ]
-        Resource = "arn:aws:logs:*:*:*"
-      },
+      local.logging_statement,
       {
         Effect = "Allow"
         Action = [
@@ -221,19 +210,16 @@ resource "aws_iam_policy" "sap_worker_policy" {
         Action = [
           "dynamodb:GetItem",
           "dynamodb:UpdateItem",
-          "dynamodb:PutItem"
+          "dynamodb:PutItem",
+          "dynamodb:Query",
+          "dynamodb:Scan"
         ]
-        Resource = aws_dynamodb_table.main_table.arn
+        Resource = [
+          aws_dynamodb_table.main_table.arn,
+          "${aws_dynamodb_table.main_table.arn}/index/*"
+        ]
       },
-      {
-        Effect = "Allow"
-        Action = [
-          "kms:Encrypt",
-          "kms:Decrypt",
-          "kms:GenerateDataKey"
-        ]
-        Resource = aws_kms_key.dynamo_key.arn
-      }
+      local.kms_statement
     ]
   })
 }
@@ -244,7 +230,7 @@ resource "aws_iam_role_policy_attachment" "sap_worker_attach" {
 }
 
 # -------------------------------------------------------------
-# 4. Dashboard API Lambda Role (Read-Only)
+# 4. Dashboard API Lambda Role (read-only)
 # -------------------------------------------------------------
 resource "aws_iam_role" "dashboard_api_role" {
   name               = "AutoReplenish-DashboardApiRole-${var.environment}"
@@ -253,26 +239,17 @@ resource "aws_iam_role" "dashboard_api_role" {
 
 resource "aws_iam_policy" "dashboard_api_policy" {
   name        = "AutoReplenish-DashboardApiPolicy-${var.environment}"
-  description = "Policy for Dashboard API: Read-Only DynamoDB access"
+  description = "Policy for Dashboard API: read-only DynamoDB access (incl. GSI1/GSI2)"
 
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "logs:CreateLogGroup",
-          "logs:CreateLogStream",
-          "logs:PutLogEvents"
-        ]
-        Resource = "arn:aws:logs:*:*:*"
-      },
+      local.logging_statement,
       {
         Effect = "Allow"
         Action = [
           "dynamodb:GetItem",
-          "dynamodb:Query",
-          "dynamodb:Scan"
+          "dynamodb:Query"
         ]
         Resource = [
           aws_dynamodb_table.main_table.arn,

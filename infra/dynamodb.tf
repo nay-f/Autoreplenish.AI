@@ -1,3 +1,6 @@
+# -------------------------------------------------------------
+# DynamoDB Single Table (PRD Section 13)
+# -------------------------------------------------------------
 resource "aws_dynamodb_table" "main_table" {
   name             = "${var.dynamodb_table_name}-${var.environment}"
   billing_mode     = "PAY_PER_REQUEST"
@@ -16,6 +19,8 @@ resource "aws_dynamodb_table" "main_table" {
     type = "S"
   }
 
+  # GSI1: entity-type listing and cross-store recency scans
+  #   (STORE, SKU, AUDIT, FEEDBACK, SAPTRANS, CHATPENDING)
   attribute {
     name = "GSI1PK"
     type = "S"
@@ -33,6 +38,27 @@ resource "aws_dynamodb_table" "main_table" {
     projection_type = "ALL"
   }
 
+  # GSI2: business-key lookups
+  #   AuditLog  -> AUDIT#{request_id}  (get audit trace by request id)
+  #   SapTrans  -> SAPPR#{sap_pr_id}   (look up a PR document number)
+  attribute {
+    name = "GSI2PK"
+    type = "S"
+  }
+
+  attribute {
+    name = "GSI2SK"
+    type = "S"
+  }
+
+  global_secondary_index {
+    name            = "GSI2"
+    hash_key        = "GSI2PK"
+    range_key       = "GSI2SK"
+    projection_type = "ALL"
+  }
+
+  # TTL drives the weather cache expiry (PRD 11.4 - 6 hour TTL).
   ttl {
     attribute_name = "ttl"
     enabled        = true
@@ -48,8 +74,9 @@ resource "aws_dynamodb_table" "main_table" {
   }
 
   tags = {
-    Name        = "${var.dynamodb_table_name}-${var.environment}"
-    Purpose     = "Single-table store for Cache, State, Audit, and Profiles"
+    Name           = "${var.dynamodb_table_name}-${var.environment}"
+    Purpose        = "Single-table store for Cache, State, Audit, and Profiles"
+    AccessPatterns = "PK/SK + GSI1 (entity listing) + GSI2 (business key)"
   }
 }
 

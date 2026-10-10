@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../services/api';
 import { StatCard } from '../components/StatCard';
-import { MessageSquareHeart, ThumbsUp, ThumbsDown, Edit3, MessageCircle } from 'lucide-react';
+import { MessageSquareHeart, ThumbsUp, ThumbsDown, Edit3, MessageCircle, AlertCircle } from 'lucide-react';
 
 export function FeedbackAnalytics() {
   const [feedbackData, setFeedbackData] = useState(null);
@@ -31,6 +31,13 @@ export function FeedbackAnalytics() {
   const topRejections = Array.isArray(feedbackData?.top_rejection_reasons) ? feedbackData.top_rejection_reasons : [];
   const recentRecords = Array.isArray(feedbackData?.recent_feedback_records) ? feedbackData.recent_feedback_records : [];
 
+  const hasFeedback = (metrics.total_recommendations || 0) > 0;
+  const approvalTrend = hasFeedback
+    ? metrics.approval_rate_pct >= 70
+      ? 'Target Terpenuhi'
+      : 'Di Bawah Target'
+    : undefined;
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -40,7 +47,7 @@ export function FeedbackAnalytics() {
           Feedback & Human-in-the-Loop Analytics
         </h2>
         <p className="text-xs text-slate-400">
-          Analisis persetujuan Kepala Toko, pola penolakan (rejection loop), dan revisi kuantitas untuk penyempurnaan agen AI
+          Analisis persetujuan Kepala Toko, pola penolakan (rejection loop), dan revisi kuantitas untuk penyempurnaan penalaran AI
         </p>
       </div>
 
@@ -48,22 +55,22 @@ export function FeedbackAnalytics() {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
           title="Tingkat Persetujuan (Approval Rate)"
-          value={`${metrics.approval_rate_pct ?? 0}%`}
-          subtitle="Target: > 70%"
+          value={hasFeedback ? `${metrics.approval_rate_pct ?? 0}%` : '-'}
+          subtitle={hasFeedback ? 'Target: > 70%' : 'Belum ada rekomendasi dievaluasi'}
           icon={ThumbsUp}
           color="emerald"
-          trend="+7.8% di atas target"
+          trend={approvalTrend}
         />
         <StatCard
           title="Tingkat Penolakan (Rejection Rate)"
-          value={`${metrics.rejection_rate_pct ?? 0}%`}
+          value={hasFeedback ? `${metrics.rejection_rate_pct ?? 0}%` : '-'}
           subtitle="Kepala Toko menolak draft"
           icon={ThumbsDown}
           color="rose"
         />
         <StatCard
           title="Tingkat Revisi Manual (Edit Rate)"
-          value={`${metrics.edit_rate_pct ?? 0}%`}
+          value={hasFeedback ? `${metrics.edit_rate_pct ?? 0}%` : '-'}
           subtitle="Penyesuaian kuantitas"
           icon={Edit3}
           color="blue"
@@ -87,8 +94,9 @@ export function FeedbackAnalytics() {
 
           <div className="space-y-3">
             {topRejections.length === 0 ? (
-              <div className="p-4 text-center text-slate-400 text-xs bg-slate-800/40 rounded-lg border border-slate-800">
-                Belum ada data penolakan yang tercatat.
+              <div className="p-6 text-center text-slate-400 text-xs bg-slate-800/40 rounded-lg border border-slate-800 flex flex-col items-center gap-2">
+                <AlertCircle className="w-5 h-5 text-slate-500" />
+                <span>Belum ada data penolakan yang tercatat.</span>
               </div>
             ) : (
               topRejections.map((item, idx) => (
@@ -113,8 +121,13 @@ export function FeedbackAnalytics() {
           <h3 className="font-bold text-white text-sm">Log Umpan Balik Terbaru (Store Manager Field Notes)</h3>
           <div className="divide-y divide-slate-800/80">
             {recentRecords.length === 0 ? (
-              <div className="py-8 text-center text-slate-400 text-xs">
-                Belum ada catatan interaksi dari Kepala Toko.
+              <div className="py-12 text-center text-slate-400 text-xs flex flex-col items-center justify-center gap-2">
+                <MessageSquareHeart className="w-6 h-6 text-slate-600" />
+                <div className="font-semibold text-slate-300">Belum Ada Feedback Kepala Toko</div>
+                <p className="text-slate-500 max-w-sm">
+                  Interaksi persetujuan, penolakan dengan alasan, atau revisi jumlah pesanan melalui Bot Telegram
+                  akan otomatis terangkum di sini.
+                </p>
               </div>
             ) : (
               recentRecords.map((fb, idx) => (

@@ -74,8 +74,16 @@ export function ReasoningTrace() {
             Memuat audit log dan trace penalaran AI...
           </div>
         ) : filteredLogs.length === 0 ? (
-          <div className="p-8 text-center text-slate-400 bg-slate-900 border border-slate-800 rounded-xl">
-            Tidak ada audit log yang sesuai dengan filter.
+          <div className="p-10 text-center text-slate-400 bg-slate-900 border border-slate-800 rounded-2xl flex flex-col items-center justify-center gap-3">
+            <div className="w-12 h-12 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-400">
+              <Sparkles className="w-6 h-6" />
+            </div>
+            <div className="font-bold text-white text-base">Belum Ada Jejak Penalaran AI (Reasoning Trace)</div>
+            <p className="text-xs text-slate-400 max-w-md leading-relaxed">
+              Jejak penalaran Bedrock Sonnet akan otomatis tercatat ketika evaluasi stok dipicu. Anda dapat memicu analisa
+              instan via Bot Telegram (<code>/analisa [store_id]</code> atau tombol <code>[⚡ Analisa Stok Sekarang]</code>)
+              atau menunggu siklus scheduler otomatis berikutnya.
+            </p>
           </div>
         ) : (
           filteredLogs.map((log) => {

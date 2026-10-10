@@ -1,69 +1,41 @@
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-venv/
-env/
-.venv/
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
+# 1. AI Agent Workspace & Internal Logs
+.agent/
+.antigravity/
+*.log
+*.tmp
 
-# Node / React
+# 2. Demo Sandbox & Local Databases (EXCLUDED FROM GIT)
+demo/
+demo.db
+*.db
+*.sqlite
+
+# 3. Environments & Secrets
+.env
+.env.*
+!.env.example
+*.pem
+
+# 4. Build Artifacts & Dependencies
 node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-.pnpm-debug.log*
 dist/
-dist-ssr/
-*.local
+build/
+__pycache__/
+*.pyc
+.pytest_cache/
+backend/build/
+cashier/dist/
+dashboard/dist/
 
-# Terraform
-**/.terraform/*
-*.tfstate
-*.tfstate.*
-crash.log
-crash.*.log
-override.tf
-override.tf.json
-*_override.tf
-*_override.tf.json
-.terraformrc
-terraform.rc
-
-# OS & IDE
+# 5. OS & IDE
 .DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
 .idea/
 .vscode/
 *.swp
 *.swo
 
-# Environment & Databases
-.env
-.env.*
-!.env.example
-*.db
-*.sqlite
-*.sqlite3
-
+# 6. Terraform
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+.terraform/

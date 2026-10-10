@@ -3,8 +3,8 @@
 Determines weekday/weekend, Indonesian public holidays, payday cycles, and active promotion multipliers.
 """
 
-from datetime import datetime, date
-from typing import Optional, Dict, Any, List
+from datetime import date
+from typing import Optional
 from ..models.schema import CalendarContext, PromoContext
 
 # Sample Indonesian Public Holidays for reference
@@ -69,12 +69,46 @@ class CalendarPromoService:
             is_payday=is_payday
         )
 
-    def get_promo_context(self, sku_id: str, target_date: Optional[date] = None) -> PromoContext:
-        """Evaluate whether promo is active for given SKU on target date."""
+    def get_promo_context(
+        self,
+        sku_id: str,
+        target_date: Optional[date] = None,
+        store: Optional[Any] = None
+    ) -> PromoContext:
+        """Evaluate whether promo or local event is active for given SKU on target date."""
         current_date = target_date or date.today()
+        date_str = current_date.strftime("%Y-%m-%d")
         weekday_idx = current_date.weekday()
-        promo_data = ACTIVE_PROMOS.get(sku_id)
 
+        # 1. Check store-specific custom promos if available
+        if store and hasattr(store, "promos") and store.promos:
+            for promo in store.promos:
+                target_skus = getattr(promo, "target_sku_ids", []) or []
+                if not target_skus or sku_id in target_skus:
+                    start = getattr(promo, "start_date", "")
+                    end = getattr(promo, "end_date", "")
+                    if (not start or start <= date_str) and (not end or date_str <= end):
+                        return PromoContext(
+                            is_active=True,
+                            promo_type=getattr(promo, "promo_type", "Custom Promo"),
+                            promo_name=getattr(promo, "promo_name", "Promo Toko"),
+                            multiplier_factor=float(getattr(promo, "multiplier_factor", 1.3))
+                        )
+
+        # 2. Check store-specific local community events
+        if store and hasattr(store, "local_events") and store.local_events:
+            for ev in store.local_events:
+                ev_date = getattr(ev, "event_date", "")
+                if ev_date == date_str:
+                    return PromoContext(
+                        is_active=True,
+                        promo_type="Local Event",
+                        promo_name=getattr(ev, "event_name", "Event Lokal"),
+                        multiplier_factor=float(getattr(ev, "impact_multiplier", 1.2))
+                    )
+
+        # 3. Fallback to default catalog
+        promo_data = ACTIVE_PROMOS.get(sku_id)
         if not promo_data:
             return PromoContext(is_active=False)
 

@@ -1,16 +1,25 @@
-"""DynamoDB Service for Single-Table Design.
+"""DynamoDB Service for Single-Table Design (real AWS SDK implementation).
 
-Supports StoreMetadata, SKUProfile, WeatherCache, TelegramState, AuditLog, and FeedbackLog.
-Includes in-memory simulation store for local testing & offline environments.
+Implements PRD Section 13.3 and 14.5:
+- StoreMetadata, SKUProfile, WeatherCache, TelegramState, AuditLog, FeedbackLog,
+  and SapTransaction entities on a single table with PK/SK.
+- Weather cache reads use a reverse-range query (ScanIndexForward=False, Limit=1)
+  on the ZONE partition key, per PRD Section 11.4.
+- TTL (6 hours) is written on every weather cache item per PRD Section 11.4.
+
+The boto3 ``Table`` resource is injectable so that unit tests can run against a
+moto-emulated DynamoDB endpoint instead of a live AWS account.
 """
 
 import time
-import json
-import logging
-from typing import Dict, Any, List, Optional
-from datetime import datetime, timezone, timedelta
+from dataclasses import fields as dataclass_fields
+from decimal import Decimal
+from typing import Dict, Any, List, Optional, Type, TypeVar
 
-from ..config import DYNAMODB_TABLE, logger, WEATHER_CACHE_TTL_HOURS
+import boto3
+from botocore.config import Config as BotoConfig
+
+from ..config import logger, DYNAMODB_TABLE, AWS_REGION, WEATHER_CACHE_TTL_HOURS, APPROVAL_TIMEOUT_HOURS
 from ..models.schema import (
     StoreProfile,
     SKUProfile,
@@ -18,129 +27,200 @@ from ..models.schema import (
     TelegramStateRecord,
     AuditLogRecord,
     FeedbackLogRecord,
+    SapTransactionRecord,
 )
 
+T = TypeVar("T")
+
+# Keys written by the single-table access pattern that are not entity fields.
+DYNAMO_ONLY_KEYS = {"GSI1PK", "GSI1SK", "GSI2PK", "GSI2SK", "ttl", "cached_epoch"}
+
+
 class DynamoDBService:
-    """DynamoDB Single Table Operations."""
+    """DynamoDB Single Table Operations backed by the real AWS SDK."""
 
-    def __init__(self, table_name: Optional[str] = None, client: Optional[Any] = None):
+    def __init__(
+        self,
+        table_name: Optional[str] = None,
+        client: Optional[Any] = None,
+        boto3_resource: Optional[Any] = None,
+    ):
+        """
+        Args:
+            table_name: Overrides config.DYNAMODB_TABLE.
+            client: Pre-built boto3 ``Table`` resource (used by tests/moto).
+            boto3_resource: Pre-built ``boto3.resource('dynamodb')`` (used by tests).
+        """
         self.table_name = table_name or DYNAMODB_TABLE
-        self.client = client
-        # In-memory storage for offline / unit tests / fallback
-        self._memory_store: Dict[str, Dict[str, Any]] = {}
+        if client is not None:
+            self.table = client
+        else:
+            resource = boto3_resource or boto3.resource(
+                "dynamodb",
+                region_name=AWS_REGION,
+                config=BotoConfig(retries={"max_attempts": 5, "mode": "standard"}),
+            )
+            self.table = resource.Table(self.table_name)
 
-    def _get_key(self, pk: str, sk: str) -> str:
-        return f"{pk}###{sk}"
+    # ---------------------------------------------------------
+    # Serialization helpers
+    # ---------------------------------------------------------
+    @staticmethod
+    def _serialize(value: Any) -> Any:
+        """Recursively convert a Python value into a DynamoDB-safe type.
+
+        boto3's resource-level serializer refuses ``float`` ("Float types are not
+        supported. Use Decimal types instead."), so every float is converted via
+        its shortest repr to avoid binary artefacts (0.1 -> Decimal('0.1')).
+        """
+        if isinstance(value, bool) or value is None:
+            return value
+        if isinstance(value, (int, str, Decimal)):
+            return value
+        if isinstance(value, float):
+            return Decimal(str(value))
+        if isinstance(value, dict):
+            return {k: DynamoDBService._serialize(v) for k, v in value.items()}
+        if isinstance(value, (list, tuple, set)):
+            return [DynamoDBService._serialize(v) for v in value]
+        return str(value)
+
+    @staticmethod
+    def _deserialize(value: Any) -> Any:
+        """Convert DynamoDB ``Decimal`` back to the narrowest Python numeric type.
+
+        DynamoDB returns *every* number as a Decimal. Returning a float for an
+        integral value would both corrupt integer semantics (quantity 30 -> 30.0)
+        and break a subsequent write, since boto3 rejects floats outright.
+        """
+        if isinstance(value, bool) or value is None:
+            return value
+        if isinstance(value, Decimal):
+            if value == value.to_integral_value():
+                return int(value)
+            return float(value)
+        if isinstance(value, dict):
+            return {k: DynamoDBService._deserialize(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [DynamoDBService._deserialize(v) for v in value]
+        return value
+
+    @classmethod
+    def _clean(cls, entity: Any) -> Dict[str, Any]:
+        """Flatten an entity into a DynamoDB-safe item.
+
+        boto3's low-level serializer cannot encode ``None`` as an AttributeValue
+        and raises an opaque exception, so null-valued fields are dropped.
+        """
+        raw = entity.to_dict() if hasattr(entity, "to_dict") else dict(entity)
+        return {
+            k: cls._serialize(v)
+            for k, v in raw.items()
+            if v is not None
+        }
+
+    @staticmethod
+    def _hydrate(cls: Type[T], item: Optional[Dict[str, Any]]) -> Optional[T]:
+        """Rebuild a dataclass from a raw DynamoDB item, dropping index/meta keys."""
+        if not item:
+            return None
+        allowed = {f.name for f in dataclass_fields(cls)}
+        data = {k: DynamoDBService._deserialize(v) for k, v in item.items() if k in allowed}
+        return cls(**data)
+
+    @staticmethod
+    def _hydrate_many(cls: Type[T], items: List[Dict[str, Any]]) -> List[T]:
+        allowed = {f.name for f in dataclass_fields(cls)}
+        return [
+            cls(**{k: DynamoDBService._deserialize(v) for k, v in item.items() if k in allowed})
+            for item in items
+        ]
 
     # ---------------------------------------------------------
     # 1. Store Profiles
     # ---------------------------------------------------------
     def put_store(self, store: StoreProfile) -> None:
-        pk = f"STORE#{store.store_id}"
-        sk = "PROFILE"
-        item = store.to_dict()
-        item["PK"] = pk
-        item["SK"] = sk
-        self._memory_store[self._get_key(pk, sk)] = item
+        self.table.put_item(Item=self._clean(store))
 
     def get_store(self, store_id: str) -> Optional[StoreProfile]:
-        pk = f"STORE#{store_id}"
-        sk = "PROFILE"
-        item = self._memory_store.get(self._get_key(pk, sk))
-        if item:
-            data = {k: v for k, v in item.items()}
-            return StoreProfile(**data)
-        return None
+        resp = self.table.get_item(Key={"PK": f"STORE#{store_id}", "SK": "PROFILE"})
+        return self._hydrate(StoreProfile, resp.get("Item"))
 
     def list_all_stores(self) -> List[StoreProfile]:
-        stores = []
-        for key, item in self._memory_store.items():
-            if key.startswith("STORE#") and key.endswith("###PROFILE"):
-                stores.append(StoreProfile(**item))
-        return stores
+        resp = self.table.query(
+            IndexName="GSI1",
+            KeyConditionExpression="GSI1PK = :pk",
+            ExpressionAttributeValues={":pk": "STORE"},
+        )
+        return self._hydrate_many(StoreProfile, resp.get("Items", []))
 
     # ---------------------------------------------------------
     # 2. SKU Profiles
     # ---------------------------------------------------------
     def put_sku(self, sku: SKUProfile) -> None:
-        pk = f"SKU#{sku.sku_id}"
-        sk = "PROFILE"
-        item = sku.to_dict()
-        item["PK"] = pk
-        item["SK"] = sk
-        self._memory_store[self._get_key(pk, sk)] = item
+        self.table.put_item(Item=self._clean(sku))
 
     def get_sku(self, sku_id: str) -> Optional[SKUProfile]:
-        pk = f"SKU#{sku_id}"
-        sk = "PROFILE"
-        item = self._memory_store.get(self._get_key(pk, sk))
-        if item:
-            return SKUProfile(**item)
-        return None
+        resp = self.table.get_item(Key={"PK": f"SKU#{sku_id}", "SK": "PROFILE"})
+        return self._hydrate(SKUProfile, resp.get("Item"))
 
     def list_all_skus(self) -> List[SKUProfile]:
-        skus = []
-        for key, item in self._memory_store.items():
-            if key.startswith("SKU#") and key.endswith("###PROFILE"):
-                skus.append(SKUProfile(**item))
-        return skus
+        resp = self.table.query(
+            IndexName="GSI1",
+            KeyConditionExpression="GSI1PK = :pk",
+            ExpressionAttributeValues={":pk": "SKU"},
+        )
+        return self._hydrate_many(SKUProfile, resp.get("Items", []))
 
     # ---------------------------------------------------------
-    # 3. Weather Cache
+    # 3. Weather Cache (PRD Section 11.4)
     # ---------------------------------------------------------
     def put_weather_cache(self, zone_id: str, weather: WeatherContext) -> None:
-        now = datetime.now(timezone.utc)
-        date_str = now.strftime("%Y-%m-%d")
-        hour_str = now.strftime("%H")
-        pk = f"ZONE#{zone_id}"
-        sk = f"WEATHER#{date_str}#{hour_str}"
+        """Persist a weather snapshot with a 6-hour DynamoDB TTL.
 
-        ttl = int(time.time()) + (WEATHER_CACHE_TTL_HOURS * 3600)
-        item = weather.to_dict()
+        SK uses a sortable timestamp so that a reverse-range query returns the
+        freshest entry without colliding with writes in the same clock hour.
+        """
+        now = time.time()
+        stamp = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(now))
+        item = self._clean(weather)
         item.update({
-            "PK": pk,
-            "SK": sk,
-            "ttl": ttl,
+            "PK": f"ZONE#{zone_id}",
+            "SK": f"WEATHER#{stamp}",
+            "ttl": int(now + (WEATHER_CACHE_TTL_HOURS * 3600)),
             "zone_id": zone_id,
-            "cached_epoch": time.time()
+            "cached_epoch": Decimal(str(now)),
         })
-        self._memory_store[self._get_key(pk, sk)] = item
+        self.table.put_item(Item=item)
 
     def get_weather_cache(self, zone_id: str) -> Optional[Dict[str, Any]]:
-        pk = f"ZONE#{zone_id}"
-        matching = [
-            v for k, v in self._memory_store.items()
-            if k.startswith(f"{pk}###WEATHER#")
-        ]
-        if not matching:
+        """Return the most recent cache entry for a zone, or None if absent/expired."""
+        resp = self.table.query(
+            KeyConditionExpression="PK = :pk",
+            ExpressionAttributeValues={":pk": f"ZONE#{zone_id}"},
+            ScanIndexForward=False,  # descending by SK -> newest first
+            Limit=1,
+        )
+        items = resp.get("Items", [])
+        if not items:
             return None
 
-        matching.sort(key=lambda x: x.get("cached_epoch", 0), reverse=True)
-        latest = matching[0]
-
-        if latest.get("ttl", 0) < time.time():
+        latest = items[0]
+        if float(latest.get("ttl", 0)) < time.time():
+            logger.info(f"Weather cache entry for zone {zone_id} has exceeded its DynamoDB TTL")
             return None
-
-        return latest
+        # Decimals come back from DynamoDB; convert so callers can use plain floats.
+        return self._deserialize(latest)
 
     # ---------------------------------------------------------
     # 4. Telegram State Machine
     # ---------------------------------------------------------
     def put_telegram_state(self, state: TelegramStateRecord) -> None:
-        pk = f"REQ#{state.request_id}"
-        sk = "STATE"
-        item = state.to_dict()
-        item["PK"] = pk
-        item["SK"] = sk
-        self._memory_store[self._get_key(pk, sk)] = item
+        self.table.put_item(Item=self._clean(state))
 
     def get_telegram_state(self, request_id: str) -> Optional[TelegramStateRecord]:
-        pk = f"REQ#{request_id}"
-        sk = "STATE"
-        item = self._memory_store.get(self._get_key(pk, sk))
-        if item:
-            return TelegramStateRecord(**item)
-        return None
+        resp = self.table.get_item(Key={"PK": f"REQ#{request_id}", "SK": "STATE"})
+        return self._hydrate(TelegramStateRecord, resp.get("Item"))
 
     def update_telegram_state_status(
         self,
@@ -149,41 +229,64 @@ class DynamoDBService:
         final_qty: Optional[int] = None,
         rejection_reason: Optional[str] = None,
         sap_pr_id: Optional[str] = None,
-        sap_error_message: Optional[str] = None
+        sap_error_message: Optional[str] = None,
+        awaiting_input: Optional[str] = None,
+        telegram_message_id: Optional[str] = None,
     ) -> Optional[TelegramStateRecord]:
-        state = self.get_telegram_state(request_id)
-        if not state:
-            return None
+        """Atomic in-place state transition without a read-modify-write race."""
+        set_parts = ["#st = :st"]
+        names = {"#st": "status"}
+        values: Dict[str, Any] = {":st": status}
 
-        state.status = status
         if final_qty is not None:
-            state.final_qty = final_qty
+            set_parts.append("#fq = :fq")
+            names["#fq"] = "final_qty"
+            values[":fq"] = final_qty
         if rejection_reason is not None:
-            state.rejection_reason = rejection_reason
+            set_parts.append("#rr = :rr")
+            names["#rr"] = "rejection_reason"
+            values[":rr"] = rejection_reason
         if sap_pr_id is not None:
-            state.sap_pr_id = sap_pr_id
+            set_parts.append("#sid = :sid")
+            names["#sid"] = "sap_pr_id"
+            values[":sid"] = sap_pr_id
         if sap_error_message is not None:
-            state.sap_error_message = sap_error_message
+            set_parts.append("#err = :err")
+            names["#err"] = "sap_error_message"
+            values[":err"] = sap_error_message
+        if awaiting_input is not None:
+            set_parts.append("#ai = :ai")
+            names["#ai"] = "awaiting_input"
+            values[":ai"] = awaiting_input
+        if telegram_message_id is not None:
+            set_parts.append("#mid = :mid")
+            names["#mid"] = "telegram_message_id"
+            values[":mid"] = telegram_message_id
 
-        self.put_telegram_state(state)
-        return state
+        self.table.update_item(
+            Key={"PK": f"REQ#{request_id}", "SK": "STATE"},
+            UpdateExpression="SET " + ", ".join(set_parts),
+            ExpressionAttributeNames=names,
+            ExpressionAttributeValues=values,
+        )
+        return self.get_telegram_state(request_id)
 
     # ---------------------------------------------------------
     # 5. Audit Log Records
     # ---------------------------------------------------------
     def put_audit_log(self, log: AuditLogRecord) -> None:
-        pk = f"AUDIT#{log.store_id}"
-        sk = f"TS#{log.created_at}#SKU#{log.sku_id}"
-        item = log.to_dict()
-        item["PK"] = pk
-        item["SK"] = sk
-        self._memory_store[self._get_key(pk, sk)] = item
+        self.table.put_item(Item=self._clean(log))
 
     def get_audit_log_by_request_id(self, request_id: str) -> Optional[AuditLogRecord]:
-        for item in self._memory_store.values():
-            if item.get("request_id") == request_id and "ai_recommended_qty" in item:
-                return AuditLogRecord(**item)
-        return None
+        """Resolve an audit record by request_id through the sparse GSI2."""
+        resp = self.table.query(
+            IndexName="GSI2",
+            KeyConditionExpression="GSI2PK = :pk",
+            ExpressionAttributeValues={":pk": f"AUDIT#{request_id}"},
+            Limit=1,
+        )
+        items = resp.get("Items", [])
+        return self._hydrate(AuditLogRecord, items[0]) if items else None
 
     def list_audit_logs(
         self,
@@ -191,47 +294,138 @@ class DynamoDBService:
         status: Optional[str] = None,
         limit: int = 50
     ) -> List[AuditLogRecord]:
-        results = []
-        for item in self._memory_store.values():
-            if "ai_recommended_qty" not in item:
-                continue
-            if store_id and item.get("store_id") != store_id:
-                continue
-            if status and item.get("sap_pr_status") != status and item.get("human_action") != status:
-                continue
+        """List audit logs newest-first.
 
-            results.append(AuditLogRecord(**item))
+        Scoped by store partition when a store_id is given, otherwise via GSI1
+        so every store is covered. ``status`` matches either the SAP outcome or
+        the human action (mirroring the original report-filter semantics).
+        """
+        if store_id:
+            resp = self.table.query(
+                KeyConditionExpression="PK = :pk",
+                ExpressionAttributeValues={":pk": f"AUDIT#{store_id}"},
+                ScanIndexForward=False,
+                Limit=max(limit * 5, 100),  # headroom for client-side status filter
+            )
+        else:
+            resp = self.table.query(
+                IndexName="GSI1",
+                KeyConditionExpression="GSI1PK = :pk",
+                ExpressionAttributeValues={":pk": "AUDIT"},
+                ScanIndexForward=False,
+                Limit=max(limit * 5, 100),
+            )
 
-        results.sort(key=lambda x: x.created_at, reverse=True)
-        return results[:limit]
+        logs = self._hydrate_many(AuditLogRecord, resp.get("Items", []))
+        if status:
+            logs = [
+                l for l in logs
+                if l.sap_pr_status == status or l.human_action == status
+            ]
+        return logs[:limit]
 
     # ---------------------------------------------------------
     # 6. Feedback Log Records
     # ---------------------------------------------------------
     def put_feedback_log(self, feedback: FeedbackLogRecord) -> None:
-        pk = f"FEEDBACK#{feedback.store_id}#{feedback.sku_id}"
-        sk = f"TS#{feedback.created_at}"
-        item = feedback.to_dict()
-        item["PK"] = pk
-        item["SK"] = sk
-        self._memory_store[self._get_key(pk, sk)] = item
+        self.table.put_item(Item=self._clean(feedback))
 
     def list_recent_feedback(self, store_id: str, sku_id: str, limit: int = 3) -> List[FeedbackLogRecord]:
-        prefix = f"FEEDBACK#{store_id}#{sku_id}"
-        matching = [
-            v for k, v in self._memory_store.items()
-            if k.startswith(f"{prefix}###TS#")
-        ]
-        matching.sort(key=lambda x: x.get("created_at", ""), reverse=True)
-        results = []
-        for item in matching[:limit]:
-            results.append(FeedbackLogRecord(**item))
-        return results
+        resp = self.table.query(
+            KeyConditionExpression="PK = :pk",
+            ExpressionAttributeValues={":pk": f"FEEDBACK#{store_id}#{sku_id}"},
+            ScanIndexForward=False,
+            Limit=limit,
+        )
+        return self._hydrate_many(FeedbackLogRecord, resp.get("Items", []))
 
     def list_all_feedbacks(self) -> List[FeedbackLogRecord]:
-        results = []
-        for item in self._memory_store.values():
-            if "original_recommended_qty" in item and "action" in item:
-                results.append(FeedbackLogRecord(**item))
-        results.sort(key=lambda x: x.created_at, reverse=True)
-        return results
+        resp = self.table.query(
+            IndexName="GSI1",
+            KeyConditionExpression="GSI1PK = :pk",
+            ExpressionAttributeValues={":pk": "FEEDBACK"},
+            ScanIndexForward=False,
+        )
+        return self._hydrate_many(FeedbackLogRecord, resp.get("Items", []))
+
+    # ---------------------------------------------------------
+    # 7. SAP Transaction Ledger
+    #    Persisted for BOTH modes so that idempotency survives
+    #    Lambda cold starts (PRD Section 14.2 - "Cek status sebelum POST").
+    # ---------------------------------------------------------
+    def get_sap_transaction(self, request_id: str) -> Optional[SapTransactionRecord]:
+        resp = self.table.get_item(Key={"PK": f"SAPTRANS#{request_id}", "SK": "TRANSACTION"})
+        return self._hydrate(SapTransactionRecord, resp.get("Item"))
+
+    def put_sap_transaction(self, txn: SapTransactionRecord) -> None:
+        self.table.put_item(Item=self._clean(txn))
+
+    def list_sap_transactions(self, limit: int = 50) -> List[SapTransactionRecord]:
+        resp = self.table.query(
+            IndexName="GSI1",
+            KeyConditionExpression="GSI1PK = :pk",
+            ExpressionAttributeValues={":pk": "SAPTRANS"},
+            ScanIndexForward=False,
+            Limit=limit,
+        )
+        return self._hydrate_many(SapTransactionRecord, resp.get("Items", []))
+
+    # ---------------------------------------------------------
+    # 8. Atomic counters
+    #    Used for SAP Purchase Requisition numbering so both LIVE and
+    #    PERSISTENT_SANDBOX modes emit monotonic, collision-free numbers
+    #    without a read-modify-write race.
+    # ---------------------------------------------------------
+    def next_sequence(self, counter_name: str, initial_value: int = 0) -> int:
+        """Atomically create-or-increment a named counter and return its new value."""
+        resp = self.table.update_item(
+            Key={"PK": f"COUNTER#{counter_name}", "SK": "VALUE"},
+            UpdateExpression="ADD #seq :inc SET #upd = :now, #meta = :meta",
+            ExpressionAttributeNames={
+                "#seq": "seq",
+                "#upd": "updated_at_epoch",
+                "#meta": "entity",
+            },
+            ExpressionAttributeValues={
+                ":inc": 1,
+                ":now": Decimal(str(time.time())),
+                ":meta": f"COUNTER#{counter_name}",
+            },
+            ReturnValues="UPDATED_NEW",
+        )
+        return int(resp["Attributes"]["seq"])
+
+    def next_sap_pr_sequence(self) -> int:
+        """Next SAP Purchase Requisition sequence number."""
+        return self.next_sequence("SAP_PR")
+
+    # ---------------------------------------------------------
+    # 9. Chat -> pending request pointers
+    #    Telegram only sends the chat_id on a free-text reply, so a pointer is
+    #    needed to know which request an EDIT / REJECT answer belongs to.
+    #    A webhook Lambda is stateless, so this lives in DynamoDB, not memory.
+    # ---------------------------------------------------------
+    def set_chat_pending_request(self, chat_id: str, request_id: str) -> None:
+        item: Dict[str, Any] = {
+            "PK": f"CHAT#{chat_id}",
+            "SK": "PENDING",
+            "request_id": request_id,
+            "updated_at_epoch": Decimal(str(time.time())),
+            "GSI1PK": "CHATPENDING",
+            "GSI1SK": str(chat_id),
+            "ttl": int(time.time() + (APPROVAL_TIMEOUT_HOURS * 3600)),
+        }
+        self.table.put_item(Item=item)
+
+    def get_chat_pending_request(self, chat_id: str) -> Optional[str]:
+        resp = self.table.get_item(Key={"PK": f"CHAT#{chat_id}", "SK": "PENDING"})
+        item = resp.get("Item")
+        if not item:
+            return None
+        if float(item.get("ttl", 0)) < time.time():
+            return None
+        request_id = item.get("request_id")
+        return str(request_id) if request_id else None
+
+    def clear_chat_pending_request(self, chat_id: str) -> None:
+        self.table.delete_item(Key={"PK": f"CHAT#{chat_id}", "SK": "PENDING"})

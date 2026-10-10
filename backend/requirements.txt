@@ -1,8 +1,16 @@
+# AutoReplenish.ai backend - AWS Lambda runtime dependencies
+#
+# This is the file vendored into the Lambda deployment package by build.sh /
+# `make build`. Keep it to RUNTIME dependencies only so the deployment zip stays
+# well under the 50 MB direct-upload limit. Test dependencies live in
+# requirements-dev.txt.
+#
+# boto3 and botocore are pre-installed in the Lambda python3.11 runtime, but
+# they are pinned here so the local build and the unit tests resolve identical
+# versions.
+
 boto3>=1.34.0
 botocore>=1.34.0
-pydantic>=2.6.0
+
+# Outbound HTTPS to OpenWeatherMap and the Telegram Bot API
 requests>=2.31.0
-pytest>=8.0.0
-pytest-mock>=3.12.0
-moto[dynamodb,secretsmanager,sqs]>=5.0.0
-python-dateutil>=2.8.2

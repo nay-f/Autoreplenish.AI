@@ -6,8 +6,7 @@ Implements PRD Section 11.6 and 15.2:
 """
 
 import math
-import logging
-from typing import Dict, Any, Tuple
+from typing import Tuple
 from ..config import logger
 
 class MoqPackagingService:
@@ -21,7 +20,9 @@ class MoqPackagingService:
         category: str = "Non-Perishable",
         risk_level: str = "medium",
         area_type: str = "Perkantoran",
-        weather_condition: str = "Cerah"
+        weather_condition: str = "Cerah",
+        shelf_life_days: int = 365,
+        is_fragile: bool = False
     ) -> Tuple[int, bool, bool, str]:
         """
         Adjust raw quantity.
@@ -36,6 +37,8 @@ class MoqPackagingService:
 
         moq = max(1, moq)
         packaging_multiple = max(1, packaging_multiple)
+        is_perishable = category.lower() == "perishable"
+        short_shelf_life = shelf_life_days <= 3
 
         moq_applied = False
         packaging_applied = False
@@ -43,31 +46,41 @@ class MoqPackagingService:
 
         # 1. Evaluate MOQ
         if adjusted_qty < moq:
-            if category.lower() == "perishable" and risk_level == "high":
-                # For perishable with high risk (e.g. weekend rain in office area), keep conservative
-                logger.info(f"Perishable SKU under MOQ ({adjusted_qty} < {moq}) with high risk. Applying minimum pack.")
-                adjusted_qty = moq
-                moq_applied = True
-            else:
-                adjusted_qty = moq
-                moq_applied = True
+            adjusted_qty = moq
+            moq_applied = True
+            if is_perishable and risk_level == "high":
+                logger.info(
+                    f"Perishable SKU under MOQ ({raw_qty} < {moq}) with high risk. "
+                    f"Flooring to the smallest valid pack {packaging_multiple}."
+                )
+                if packaging_multiple > raw_qty:
+                    adjusted_qty = packaging_multiple
 
         # 2. Packaging multiple rounding
         rem = adjusted_qty % packaging_multiple
         if rem != 0:
             packaging_applied = True
-            if category.lower() == "perishable" and risk_level in ("high", "medium"):
-                # Check if rounding up causes excessive inventory for perishable
+
+            # Conservative (downward) rounding is applied to anything that
+            # spoils or breaks: perishables, short shelf life, or fragile goods.
+            conservative = is_perishable or short_shelf_life or is_fragile
+
+            if conservative and risk_level in ("high", "medium"):
                 round_down_qty = (adjusted_qty // packaging_multiple) * packaging_multiple
                 round_up_qty = round_down_qty + packaging_multiple
 
-                # If round_down is at least MOQ, consider conservative rounding
                 if round_down_qty >= moq and (round_up_qty - adjusted_qty) > (packaging_multiple / 2):
                     adjusted_qty = round_down_qty
-                    note = f"Dibulatkan ke bawah ({adjusted_qty} pcs) untuk mencegah spoilage perishable"
+                    driver = []
+                    if is_perishable:
+                        driver.append("perishable")
+                    if short_shelf_life:
+                        driver.append(f"shelf life {shelf_life_days} hari")
+                    if is_fragile:
+                        driver.append("barang mudah pecah")
+                    note = f"Dibulatkan ke bawah ({adjusted_qty} pcs) untuk mencegah kerugian ({', '.join(driver)})"
                     return adjusted_qty, moq_applied, packaging_applied, note
-                else:
-                    adjusted_qty = round_up_qty
+                adjusted_qty = round_up_qty
             else:
                 # Non-perishable standard: round up to next multiple
                 adjusted_qty = math.ceil(adjusted_qty / packaging_multiple) * packaging_multiple
@@ -75,5 +88,9 @@ class MoqPackagingService:
         note = "Sesuai kelipatan kemasan" if packaging_applied else "Sesuai kebutuhan rekomendasi"
         if moq_applied:
             note += f" (Disesuaikan ke MOQ {moq})"
+        if is_fragile:
+            note += " — penanganan hati-hati (mudah pecah)"
+        if short_shelf_life:
+            note += f" — perhatikan shelf life {shelf_life_days} hari"
 
         return adjusted_qty, moq_applied, packaging_applied, note

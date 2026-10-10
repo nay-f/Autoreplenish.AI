@@ -1,0 +1,42 @@
+{
+  "stores": [
+    {
+      "store_id": "STR-COMMERCIAL-01",
+      "store_name": "Minimarket Cabang Sentra Bisnis",
+      "area_type": "Komersial / Perkantoran",
+      "zone": "JAKARTA_PUSAT",
+      "address": "Kawasan Sentra Bisnis, Jakarta Pusat, DKI Jakarta",
+      "latitude": -6.2088,
+      "longitude": 106.8456,
+      "sap_plant": "1000",
+      "storage_location": "STR-COMMERCIAL-01",
+      "telegram_chat_id": "",
+      "active": true,
+      "opening_stock": {
+        "SKU-FMCG-001": {"physical_stock": 10, "threshold": 24, "average_daily_burn_rate": 18.0, "lead_time_days": 1, "open_pr_qty": 0},
+        "SKU-FMCG-002": {"physical_stock": 12, "threshold": 10, "average_daily_burn_rate": 1.5,  "lead_time_days": 3, "open_pr_qty": 0},
+        "SKU-FMCG-003": {"physical_stock": 9,  "threshold": 12, "average_daily_burn_rate": 2.0,  "lead_time_days": 2, "open_pr_qty": 0},
+        "SKU-FMCG-004": {"physical_stock": 20, "threshold": 48, "average_daily_burn_rate": 30.0, "lead_time_days": 1, "open_pr_qty": 0}
+      }
+    },
+    {
+      "store_id": "STR-RESIDENTIAL-01",
+      "store_name": "Minimarket Cabang Residensial",
+      "area_type": "Pemukiman Warga",
+      "zone": "SEMARANG_KOTA",
+      "address": "Kawasan Perumahan, Semarang, Jawa Tengah",
+      "latitude": -6.9666,
+      "longitude": 110.4166,
+      "sap_plant": "1000",
+      "storage_location": "STR-RESIDENTIAL-01",
+      "telegram_chat_id": "",
+      "active": true,
+      "opening_stock": {
+        "SKU-FMCG-001": {"physical_stock": 14, "threshold": 24, "average_daily_burn_rate": 10.0, "lead_time_days": 1, "open_pr_qty": 0},
+        "SKU-FMCG-002": {"physical_stock": 6,  "threshold": 15, "average_daily_burn_rate": 4.0,  "lead_time_days": 3, "open_pr_qty": 0},
+        "SKU-FMCG-003": {"physical_stock": 8,  "threshold": 18, "average_daily_burn_rate": 5.0,  "lead_time_days": 2, "open_pr_qty": 0},
+        "SKU-FMCG-004": {"physical_stock": 30, "threshold": 36, "average_daily_burn_rate": 12.0, "lead_time_days": 1, "open_pr_qty": 0}
+      }
+    }
+  ]
+}
