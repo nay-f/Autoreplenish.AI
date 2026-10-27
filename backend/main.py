@@ -1,10 +1,11 @@
 import time
 import uuid
+import hmac
 import logging
 import threading
 import requests
 import boto3
-from fastapi import FastAPI, HTTPException, Depends, Request
+from fastapi import FastAPI, HTTPException, Depends, Request, Header
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -24,6 +25,7 @@ from backend.src.services.dynamodb_service import DynamoDBService
 from backend.src.services.orchestrator_service import OrchestratorService
 from backend.src.services.sap_service import SAPService
 from backend.src.services.telegram_service import TelegramService
+from backend.src.services.approval_queue_service import ApprovalQueueService
 
 # Konfigurasi Structured Logging
 logging.basicConfig(
@@ -47,386 +49,48 @@ db = DynamoDBService()
 orchestrator = OrchestratorService()
 sap_svc = SAPService(db)
 tg_svc = TelegramService(db)
+approval_queue = ApprovalQueueService()
 
-def handle_telegram_update(update: dict):
-    if "callback_query" in update:
-        cb = update["callback_query"]
-        cb_id = cb["id"]
-        data = cb.get("data", "")
-        chat_id = str(cb["message"]["chat"]["id"])
-        message_id = cb["message"]["message_id"]
 
-        # 1. Pilihan Area pada Registrasi Toko (Disimpan di DynamoDB)
-        if data.startswith("REG_AREA:"):
-            area_choice = data.split(":", 1)[1]
-            session = db.get_telegram_session(chat_id)
-            if session:
-                session["area_type"] = area_choice
-                session["step"] = "WAIT_LOCATION"
-                db.save_telegram_session(chat_id, session)
-                tg_svc.answer_callback(cb_id, f"Tipe area: {area_choice}")
-                _send_tg_text(
-                    chat_id,
-                    "📍 *Langkah 3/4: Koordinat GPS Toko*\n"
-                    "Silakan kirim lokasi toko Anda menggunakan fitur *Attach (📎) -> Location (Lokasi)* di Telegram, "
-                    "atau ketik koordinat manual dengan format: `-6.9666, 110.4166`",
-                )
-            else:
-                tg_svc.answer_callback(cb_id, "Sesi pendaftaran telah kedaluwarsa. Ketik /tambah_toko lagi.")
-            return
+def _telegram_can_approve(chat_id: str, state) -> bool:
+    if not config.TELEGRAM_REQUIRE_STORE_BINDING:
+        return True
+    store = db.get_store(state.store_id)
+    return bool(store and str(store.telegram_chat_id) == str(chat_id))
 
-        # 2. Pemicu Analisa On-Demand via Tombol Telegram
-        if data.startswith("RUN_EVAL:"):
-            target_store_id = data.split(":", 1)[1]
-            tg_svc.answer_callback(cb_id, "Memulai analisa...")
-            _send_tg_text(
-                chat_id,
-                f"⏳ Sedang menjalankan analisa kognitif untuk toko *{target_store_id}*...",
-            )
-            res = orchestrator.evaluate_store(target_store_id, force_all=True)
-            if res.get("skipped_locked"):
-                _send_tg_text(chat_id, f"⚠️ {res.get('message')}")
-            else:
-                _send_tg_text(
-                    chat_id,
-                    f"✅ Analisa selesai untuk *{res['store_name']}*.\n"
-                    f"Cuaca saat ini: {res['weather'].get('condition')} ({res['weather'].get('temperature_c')}°C).\n"
-                    f"Total SKU dievaluasi: {res['evaluated_count']} item.",
-                )
-            return
 
-        # 3. Eksekusi Tombol APPROVE / EDIT / REJECT dengan Atomic Conditional Lock
-        if ":" in data:
-            action, req_id = data.split(":", 1)
-            state = db.get_approval_state(req_id)
-            if not state:
-                tg_svc.answer_callback(cb_id, "Data request tidak ditemukan.")
-                return
+def _record_telegram_security_event(event_type: str, request_id: str = "", store_id: str = "", actor_id: str = ""):
+    """Record security-relevant Telegram decisions without storing message content or secrets."""
+    try:
+        db.save_audit_log(
+            store_id=store_id or "SECURITY",
+            timestamp_str=str(int(time.time())),
+            sku_id="SECURITY",
+            audit_data={
+                "event_type": event_type,
+                "request_id": request_id,
+                "actor_id": str(actor_id),
+            },
+        )
+    except Exception:
+        logger.exception("Gagal menyimpan audit event keamanan Telegram: %s", event_type)
 
-            if action == "APPROVE":
-                # Atomic Lock: Ubah PENDING_APPROVAL -> SAP_SUBMITTING
-                locked = db.transition_approval_state(
-                    request_id=req_id,
-                    expected_current_statuses=["PENDING_APPROVAL", "EDIT_REQUESTED"],
-                    new_status="SAP_SUBMITTING",
-                )
-                if not locked:
-                    tg_svc.answer_callback(
-                        cb_id, f"Pesanan ini sudah diproses ({state.status})."
-                    )
-                    return
 
-                tg_svc.answer_callback(cb_id, "Menyetujui & memproses PR SAP...")
-                store_obj, sku_obj = _resolve_store_and_sku(
-                    state.store_id, state.sku_id, state.sku_name
-                )
-                pr = sap_svc.create_purchase_requisition(
-                    store=store_obj,
-                    sku=sku_obj,
-                    quantity=state.recommended_qty,
-                    idempotency_key=req_id,
-                )
-                final_status = (
-                    "SAP_SUBMITTED"
-                    if pr["status"] in ("SAP_SUBMITTED", "BTP_VERIFIED_SANDBOX_PR")
-                    else "SAP_FAILED"
-                )
-                db.transition_approval_state(
-                    request_id=req_id,
-                    expected_current_statuses=["SAP_SUBMITTING"],
-                    new_status=final_status,
-                    final_qty=state.recommended_qty,
-                    sap_pr_id=pr["pr_number"],
-                )
-                tg_svc.update_message_status(
-                    chat_id,
-                    message_id,
-                    f"✅ *PESANAN DISETUJUI*\n"
-                    f"━━━━━━━━━━━━━━━━━━━━━━\n"
-                    f"🏷️ *SKU:* {sku_obj.sku_name}\n"
-                    f"📦 *Kuota Disetujui:* `{state.recommended_qty} Pcs`\n"
-                    f"💰 *Estimasi Nilai:* `Rp {pr['total_amount']:,.0f}`\n"
-                    f"📄 *No. PR SAP:* `{pr['pr_number']}`\n"
-                    f"📡 *Status SAP:* `{pr['status']}`",
-                )
-
-            elif action == "REJECT":
-                locked = db.transition_approval_state(
-                    request_id=req_id,
-                    expected_current_statuses=["PENDING_APPROVAL", "EDIT_REQUESTED"],
-                    new_status="REJECTED",
-                    final_qty=0,
-                    rejection_reason="Ditolak oleh Kepala Toko",
-                )
-                if not locked:
-                    tg_svc.answer_callback(
-                        cb_id, f"Pesanan ini sudah diproses ({state.status})."
-                    )
-                    return
-
-                tg_svc.answer_callback(cb_id, "Pesanan ditolak.")
-                tg_svc.update_message_status(
-                    chat_id,
-                    message_id,
-                    f"❌ *PESANAN DITOLAK*\n"
-                    f"━━━━━━━━━━━━━━━━━━━━━━\n"
-                    f"🏷️ *SKU:* {state.sku_name or state.sku_id}\n"
-                    f"Tidak ada Purchase Requisition yang diterbitkan.",
-                )
-
-            elif action == "EDIT":
-                locked = db.transition_approval_state(
-                    request_id=req_id,
-                    expected_current_statuses=["PENDING_APPROVAL", "EDIT_REQUESTED"],
-                    new_status="EDIT_REQUESTED",
-                )
-                if not locked:
-                    tg_svc.answer_callback(
-                        cb_id, f"Pesanan ini sudah diproses ({state.status})."
-                    )
-                    return
-
-                tg_svc.answer_callback(cb_id, "Silakan ketik jumlah unit baru")
-                db.save_telegram_session(
-                    chat_id,
-                    {
-                        "step": "WAIT_EDIT_QTY",
-                        "req_id": req_id,
-                        "message_id": message_id,
-                    },
-                )
-                _send_tg_text(
-                    chat_id,
-                    f"✏️ Ketik jumlah unit pesanan baru untuk *{state.sku_name or state.sku_id}* (angka saja, misal: `36`):",
-                )
-        return
-
-    if "message" in update:
-        msg = update["message"]
-        chat_id = str(msg["chat"]["id"])
-        text = msg.get("text", "").strip()
-        location = msg.get("location")
-
-        if text in ["/start", "/help"]:
-            _send_tg_text(
-                chat_id,
-                "🤖 *Selamat Datang di AutoReplenish.ai Bot*\n\n"
-                "Perintah yang tersedia:\n"
-                "• `/tambah_toko` — Daftarkan toko baru & atur titik GPS\n"
-                "• `/analisa` — Jalankan analisa stok instan (on-demand)\n"
-                "• `/daftar_toko` — Lihat daftar toko yang aktif",
-            )
-            return
-
-        if text == "/daftar_toko":
-            stores = db.list_stores()
-            if not stores:
-                _send_tg_text(chat_id, "Belum ada toko terdaftar.")
-                return
-            lines = ["🏪 *Daftar Toko Aktif:*"]
-            for s in stores:
-                lines.append(f"• `{s.store_id}` — *{s.store_name}* ({s.area_type})")
-            _send_tg_text(chat_id, "\n".join(lines))
-            return
-
-        if text.startswith("/analisa"):
-            stores = db.list_stores()
-            if not stores:
-                _send_tg_text(
-                    chat_id,
-                    "Belum ada toko terdaftar. Gunakan `/tambah_toko` terlebih dahulu.",
-                )
-                return
-            buttons = [
-                [
-                    {
-                        "text": f"⚡ {s.store_name} ({s.store_id})",
-                        "callback_data": f"RUN_EVAL:{s.store_id}",
-                    }
-                ]
-                for s in stores
-            ]
-            _send_tg_text(
-                chat_id,
-                "Pilih toko yang ingin dianalisa sekarang (tidak mengganggu jadwal otomatis 3 jam):",
-                reply_markup={"inline_keyboard": buttons},
-            )
-            return
-
-        if text in ["/tambah_toko", "/register_store"]:
-            db.save_telegram_session(chat_id, {"step": "WAIT_STORE_NAME"})
-            _send_tg_text(
-                chat_id,
-                "🏪 *Langkah 1/4: Nama Toko*\nSilakan ketik nama toko baru Anda (contoh: `Toko Almadina Wirosari`):",
-            )
-            return
-
-        # Baca state sesi percakapan dari DynamoDB
-        session = db.get_telegram_session(chat_id)
-        if not session:
-            return
-
-        step = session.get("step")
-
-        if step == "WAIT_STORE_NAME" and text:
-            clean_slug = "".join(c for c in text.upper() if c.isalnum())[:6]
-            session["store_name"] = text
-            session["store_id"] = f"STR-{clean_slug}-{uuid.uuid4().hex[:2].upper()}"
-            session["step"] = "WAIT_AREA"
-            db.save_telegram_session(chat_id, session)
-            keyboard = {
-                "inline_keyboard": [
-                    [
-                        {
-                            "text": "🏢 Komersial / Perkantoran",
-                            "callback_data": "REG_AREA:Komersial / Perkantoran",
-                        }
-                    ],
-                    [
-                        {
-                            "text": "🏡 Residensial / Pemukiman",
-                            "callback_data": "REG_AREA:Residensial / Pemukiman",
-                        }
-                    ],
-                    [
-                        {
-                            "text": "🌾 Pasar / Sub-Urban",
-                            "callback_data": "REG_AREA:Pasar / Sub-Urban",
-                        }
-                    ],
-                ]
-            }
-            _send_tg_text(
-                chat_id,
-                f"ID Toko dibuat: `{session['store_id']}`\n\n"
-                "🏙️ *Langkah 2/4: Pilih Tipe Wilayah Toko:*",
-                reply_markup=keyboard,
-            )
-            return
-
-        if step == "WAIT_LOCATION":
-            if location:
-                session["latitude"] = float(location["latitude"])
-                session["longitude"] = float(location["longitude"])
-            elif "," in text:
-                try:
-                    lat_s, lon_s = text.split(",", 1)
-                    lat_v, lon_v = float(lat_s.strip()), float(lon_s.strip())
-                    if not (-90 <= lat_v <= 90 and -180 <= lon_v <= 180):
-                        raise ValueError("Rentang koordinat di luar batas bumi.")
-                    session["latitude"] = lat_v
-                    session["longitude"] = lon_v
-                except ValueError:
-                    _send_tg_text(
-                        chat_id,
-                        "Format koordinat tidak valid (Lat -90 s/d 90, Lon -180 s/d 180). Contoh: `-7.0864, 111.1687`",
-                    )
-                    return
-            else:
-                _send_tg_text(
-                    chat_id, "Silakan bagikan lokasi GPS atau ketik `lat, lon`."
-                )
-                return
-
-            session["step"] = "WAIT_ZONE"
-            db.save_telegram_session(chat_id, session)
-            _send_tg_text(
-                chat_id,
-                f"✅ Koordinat terekam: `{session['latitude']}, {session['longitude']}`\n\n"
-                "🚚 *Langkah 4/4: Kode Zona Logistik DC*\n"
-                "Ketik kode zona pengiriman (contoh: `ZONE-GROBOGAN-01` atau `ZONE-SMG-01`):",
-            )
-            return
-
-        if step == "WAIT_ZONE" and text:
-            new_store = StoreProfile(
-                store_id=session["store_id"],
-                store_name=session["store_name"],
-                area_type=session["area_type"],
-                zone=text.upper()[:64],
-                latitude=session["latitude"],
-                longitude=session["longitude"],
-                telegram_chat_id=chat_id,
-                ingestion_mode="POS_LOCAL",
-            )
-            db.save_store(new_store)
-            default_sku = SKUItem(
-                sku_id="SKU-MINYAK-01",
-                sku_name="Minyak Goreng Pouch 2L",
-                category="Daily Staples",
-                physical_stock=8,
-                threshold=20,
-                average_daily_burn_rate=12.0,
-                lead_time_days=2,
-                moq=12,
-                packaging_multiple=12,
-                unit_price=34500.0,
-                is_perishable=False,
-            )
-            db.save_sku(new_store.store_id, default_sku)
-            db.delete_telegram_session(chat_id)
-
-            _send_tg_text(
-                chat_id,
-                f"🎉 *Toko Berhasil Terdaftar & Sinkron ke Dashboard!*\n"
-                f"━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"🆔 *ID:* `{new_store.store_id}`\n"
-                f"🏪 *Nama:* {new_store.store_name}\n"
-                f"🏙️ *Wilayah:* {new_store.area_type}\n"
-                f"📍 *GPS:* `{new_store.latitude}, {new_store.longitude}`\n"
-                f"🚚 *Zona:* `{new_store.zone}`\n\n"
-                f"Ketik `/analisa` untuk menguji evaluasi AI pada toko ini sekarang.",
-            )
-            return
-
-        if step == "WAIT_EDIT_QTY" and text:
-            try:
-                new_qty = int(text)
-                if new_qty <= 0 or new_qty > 100000:
-                    raise ValueError("Kuota harus antara 1 - 100.000")
-                req_id = session["req_id"]
-                state = db.get_approval_state(req_id)
-
-                locked = db.transition_approval_state(
-                    request_id=req_id,
-                    expected_current_statuses=["EDIT_REQUESTED", "PENDING_APPROVAL"],
-                    new_status="SAP_SUBMITTING",
-                )
-                if state and locked:
-                    store_obj, sku_obj = _resolve_store_and_sku(
-                        state.store_id, state.sku_id, state.sku_name
-                    )
-                    pr = sap_svc.create_purchase_requisition(
-                        store=store_obj,
-                        sku=sku_obj,
-                        quantity=new_qty,
-                        idempotency_key=req_id,
-                    )
-                    db.transition_approval_state(
-                        request_id=req_id,
-                        expected_current_statuses=["SAP_SUBMITTING"],
-                        new_status="EDITED",
-                        final_qty=new_qty,
-                        sap_pr_id=pr["pr_number"],
-                    )
-                    _send_tg_text(
-                        chat_id,
-                        f"✅ *KUOTA DIREVISI & DISETUJUI*\n"
-                        f"━━━━━━━━━━━━━━━━━━━━━━\n"
-                        f"🏷️ *SKU:* {sku_obj.sku_name}\n"
-                        f"📦 *Kuota Baru:* `{new_qty} Pcs` (Rekomendasi awal: {state.recommended_qty})\n"
-                        f"💰 *Total Nilai:* `Rp {pr['total_amount']:,.0f}`\n"
-                        f"📄 *No. PR SAP:* `{pr['pr_number']}`\n"
-                        f"📡 *Status SAP:* `{pr['status']}`",
-                    )
-                else:
-                    _send_tg_text(chat_id, "⚠️ Request ini sudah tidak dapat diubah.")
-                db.delete_telegram_session(chat_id)
-            except ValueError:
-                _send_tg_text(
-                    chat_id, "Masukkan angka bulat positif yang valid (1 - 100000)."
-                )
-
+def _enqueue_approved_request(state, chat_id: str, quantity: int) -> dict:
+    locked = db.transition_approval_state(
+        state.request_id, ["PENDING_APPROVAL", "EDIT_REQUESTED"], "APPROVED", final_qty=quantity
+    )
+    if not locked:
+        raise RuntimeError(f"Request sudah diproses ({state.status}).")
+    try:
+        result = approval_queue.enqueue(
+            state.request_id, state.store_id, state.sku_id, quantity, chat_id
+        )
+        db.transition_approval_state(state.request_id, ["APPROVED"], "ENQUEUED")
+        return result
+    except Exception:
+        db.transition_approval_state(state.request_id, ["APPROVED"], "QUEUE_FAILED")
+        raise
 
 # P0 #6: Global Exception Handler agar tidak membocorkan stack trace internal ke client
 @app.exception_handler(Exception)
@@ -495,13 +159,29 @@ def get_me(current_user: dict = Depends(get_current_user)):
     return current_user
 
 
+@app.post("/api/v1/webhooks/telegram")
+async def telegram_webhook(
+    request: Request,
+    x_telegram_bot_api_secret_token: str | None = Header(default=None),
+):
+    if config.ENVIRONMENT != "development":
+        if not config.TELEGRAM_WEBHOOK_SECRET:
+            raise HTTPException(status_code=503, detail="Telegram webhook secret belum dikonfigurasi.")
+        if not hmac.compare_digest(
+            x_telegram_bot_api_secret_token or "", config.TELEGRAM_WEBHOOK_SECRET
+        ):
+            raise HTTPException(status_code=401, detail="Webhook Telegram tidak valid.")
+    handle_telegram_update(await request.json(), allow_long_running=False)
+    return {"ok": True}
+
+
 @app.get("/api/v1/health/integrations")
 def check_integrations_health(current_user: dict = Depends(get_current_user)):
     """Memeriksa status riil seluruh API eksternal tanpa membocorkan token/secret."""
     status_report = {}
 
     # 1. Cek AWS Bedrock
-    if not config.AWS_ACCESS_KEY_ID or not config.BEDROCK_MODEL_ID:
+    if not config.BEDROCK_MODEL_ID:
         status_report["bedrock"] = {
             "status": "NOT_CONFIGURED",
             "detail": "Kredensial AWS / Model ID kosong",
@@ -511,8 +191,6 @@ def check_integrations_health(current_user: dict = Depends(get_current_user)):
             bedrock_ctrl = boto3.client(
                 "bedrock",
                 region_name=config.AWS_REGION,
-                aws_access_key_id=config.AWS_ACCESS_KEY_ID,
-                aws_secret_access_key=config.AWS_SECRET_ACCESS_KEY,
             )
             bedrock_ctrl.list_foundation_models(byProvider="Anthropic")
             status_report["bedrock"] = {
@@ -731,9 +409,8 @@ def get_governance_and_accuracy_metrics(
 
     # Metrik Transaksi SAP PR
     total_prs = len(pr_logs)
-    sap_success = sum(
-        1 for p in pr_logs if p.get("status") in ("SAP_SUBMITTED", "BTP_VERIFIED_SANDBOX_PR")
-    )
+    sap_success = sum(1 for p in pr_logs if p.get("status") == "SAP_SUBMITTED")
+    sandbox_success = sum(1 for p in pr_logs if p.get("status") == "BTP_VERIFIED_SANDBOX_PR")
     sap_failed = total_prs - sap_success
 
     return {
@@ -764,6 +441,7 @@ def get_governance_and_accuracy_metrics(
         "sap_transaction_metrics": {
             "sap_pr_total": total_prs,
             "sap_pr_success_total": sap_success,
+            "sap_sandbox_verified_total": sandbox_success,
             "sap_pr_failure_total": sap_failed,
             "sap_success_rate_pct": round((sap_success / total_prs) * 100, 1) if total_prs else 0.0,
         },
@@ -779,19 +457,26 @@ def _send_tg_text(chat_id: str, text: str, reply_markup: dict = None):
     requests.post(f"{tg_svc.base_url}/sendMessage", json=payload, timeout=5)
 
 
-def handle_telegram_update(update: dict):
+def handle_telegram_update(update: dict, allow_long_running: bool = True):
     if "callback_query" in update:
-        cb = update["callback_query"]
-        cb_id = cb["id"]
+        cb = update.get("callback_query") or {}
+        cb_id = cb.get("id")
         data = cb.get("data", "")
-        chat_id = str(cb["message"]["chat"]["id"])
-        message_id = cb["message"]["message_id"]
+        message = cb.get("message") or {}
+        chat = message.get("chat") or {}
+        if not cb_id or chat.get("id") is None:
+            logger.warning("Telegram callback malformed; ignored without side effects.")
+            return
+        chat_id = str(chat["id"])
+        message_id = message.get("message_id")
 
         if data.startswith("REG_AREA:"):
             area_choice = data.split(":", 1)[1]
-            if chat_id in TELEGRAM_SESSIONS:
-                TELEGRAM_SESSIONS[chat_id]["area_type"] = area_choice
-                TELEGRAM_SESSIONS[chat_id]["step"] = "WAIT_LOCATION"
+            session = db.get_telegram_session(chat_id)
+            if session:
+                session["area_type"] = area_choice
+                session["step"] = "WAIT_LOCATION"
+                db.save_telegram_session(chat_id, session)
                 tg_svc.answer_callback(cb_id, f"Tipe area: {area_choice}")
                 _send_tg_text(
                     chat_id,
@@ -802,6 +487,9 @@ def handle_telegram_update(update: dict):
             return
 
         if data.startswith("RUN_EVAL:"):
+            if not allow_long_running:
+                tg_svc.answer_callback(cb_id, "Analisa dijalankan oleh scheduler, bukan webhook.")
+                return
             target_store_id = data.split(":", 1)[1]
             tg_svc.answer_callback(cb_id, "Memulai analisa...")
             _send_tg_text(
@@ -822,48 +510,52 @@ def handle_telegram_update(update: dict):
             state = db.get_approval_state(req_id)
             if not state:
                 tg_svc.answer_callback(cb_id, "Data request tidak ditemukan.")
+                _record_telegram_security_event(
+                    "UNKNOWN_APPROVAL_REQUEST", request_id=req_id, actor_id=chat_id
+                )
+                return
+
+            if not _telegram_can_approve(chat_id, state):
+                tg_svc.answer_callback(cb_id, "Chat Telegram ini tidak berwenang untuk toko tersebut.")
+                _record_telegram_security_event(
+                    "UNAUTHORIZED_APPROVAL_CALLBACK",
+                    request_id=req_id,
+                    store_id=state.store_id,
+                    actor_id=chat_id,
+                )
                 return
 
             # P0 #8: Cegah duplikasi klik apabila request sudah pernah diproses
-            if state.status != "PENDING_APPROVAL":
+            if state.status not in ("PENDING_APPROVAL", "EDIT_REQUESTED"):
                 tg_svc.answer_callback(
                     cb_id, f"Request ini sudah berstatus {state.status}."
+                )
+                _record_telegram_security_event(
+                    "DUPLICATE_OR_STALE_APPROVAL_CALLBACK",
+                    request_id=req_id,
+                    store_id=state.store_id,
+                    actor_id=chat_id,
                 )
                 return
 
             if action == "APPROVE":
-                tg_svc.answer_callback(cb_id, "Menyetujui & memproses PR SAP...")
-                store_obj, sku_obj = _resolve_store_and_sku(
-                    state.store_id, state.sku_id, state.sku_name
-                )
-                pr = sap_svc.create_purchase_requisition(
-                    store=store_obj,
-                    sku=sku_obj,
-                    quantity=state.recommended_qty,
-                    idempotency_key=req_id,
-                )
-                final_status = (
-                    "SAP_SUBMITTED"
-                    if pr["status"] in ("SAP_SUBMITTED", "BTP_VERIFIED_SANDBOX_PR")
-                    else "SAP_FAILED"
-                )
-                db.update_approval_state(
-                    req_id,
-                    final_status,
-                    final_qty=state.recommended_qty,
-                    sap_pr_id=pr["pr_number"],
-                )
-                tg_svc.update_message_status(
-                    chat_id,
-                    message_id,
-                    f"✅ *PESANAN DISETUJUI*\n"
-                    f"━━━━━━━━━━━━━━━━━━━━━━\n"
-                    f"🏷️ *SKU:* {sku_obj.sku_name}\n"
-                    f"📦 *Kuota Disetujui:* `{state.recommended_qty} Pcs`\n"
-                    f"💰 *Estimasi Nilai:* `Rp {pr['total_amount']:,.0f}`\n"
-                    f"📄 *No. PR SAP:* `{pr['pr_number']}`\n"
-                    f"📡 *Status SAP:* `{pr['status']}`",
-                )
+                try:
+                    _enqueue_approved_request(state, chat_id, state.recommended_qty)
+                except Exception as exc:
+                    logger.error("Approval queue gagal untuk %s: %s", req_id, exc)
+                    tg_svc.answer_callback(cb_id, "Approval ditahan karena queue SAP belum tersedia.")
+                    return
+                tg_svc.answer_callback(cb_id, "Approval diterima; job SAP masuk antrean.")
+                if message_id is not None:
+                    tg_svc.update_message_status(
+                        chat_id,
+                        message_id,
+                        "✅ *PESANAN DISETUJUI*\n"
+                        "━━━━━━━━━━━━━━━━━━━━━━\n"
+                        f"🏷️ *SKU:* {state.sku_name or state.sku_id}\n"
+                        f"📦 *Kuota:* `{state.recommended_qty} Pcs`\n"
+                        "📬 *Status:* Menunggu worker SAP (SQS)",
+                    )
 
             elif action == "REJECT":
                 tg_svc.answer_callback(cb_id, "Pesanan ditolak.")
@@ -873,22 +565,26 @@ def handle_telegram_update(update: dict):
                     final_qty=0,
                     rejection_reason="Ditolak oleh Kepala Toko",
                 )
-                tg_svc.update_message_status(
-                    chat_id,
-                    message_id,
-                    f"❌ *PESANAN DITOLAK*\n"
-                    f"━━━━━━━━━━━━━━━━━━━━━━\n"
-                    f"🏷️ *SKU:* {state.sku_name or state.sku_id}\n"
-                    f"Tidak ada Purchase Requisition yang diterbitkan.",
-                )
+                if message_id is not None:
+                    tg_svc.update_message_status(
+                        chat_id,
+                        message_id,
+                        f"❌ *PESANAN DITOLAK*\n"
+                        f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                        f"🏷️ *SKU:* {state.sku_name or state.sku_id}\n"
+                        f"Tidak ada Purchase Requisition yang diterbitkan.",
+                    )
 
             elif action == "EDIT":
+                db.transition_approval_state(
+                    req_id, ["PENDING_APPROVAL", "EDIT_REQUESTED"], "EDIT_REQUESTED"
+                )
                 tg_svc.answer_callback(cb_id, "Silakan ketik jumlah unit baru")
-                TELEGRAM_SESSIONS[chat_id] = {
+                db.save_telegram_session(chat_id, {
                     "step": "WAIT_EDIT_QTY",
                     "req_id": req_id,
                     "message_id": message_id,
-                }
+                })
                 _send_tg_text(
                     chat_id,
                     f"✏️ Ketik jumlah unit pesanan baru untuk *{state.sku_name or state.sku_id}* (angka saja, misal: `36`):",
@@ -948,14 +644,14 @@ def handle_telegram_update(update: dict):
             return
 
         if text in ["/tambah_toko", "/register_store"]:
-            TELEGRAM_SESSIONS[chat_id] = {"step": "WAIT_STORE_NAME"}
+            db.save_telegram_session(chat_id, {"step": "WAIT_STORE_NAME"})
             _send_tg_text(
                 chat_id,
                 "🏪 *Langkah 1/4: Nama Toko*\nSilakan ketik nama toko baru Anda (contoh: `Toko Almadina Wirosari`):",
             )
             return
 
-        session = TELEGRAM_SESSIONS.get(chat_id)
+        session = db.get_telegram_session(chat_id)
         if not session:
             return
 
@@ -1055,7 +751,7 @@ def handle_telegram_update(update: dict):
                 is_perishable=False,
             )
             db.save_sku(new_store.store_id, default_sku)
-            del TELEGRAM_SESSIONS[chat_id]
+            db.delete_telegram_session(chat_id)
 
             _send_tg_text(
                 chat_id,
@@ -1077,30 +773,17 @@ def handle_telegram_update(update: dict):
                     raise ValueError("Kuota harus antara 1 - 100.000")
                 req_id = session["req_id"]
                 state = db.get_approval_state(req_id)
-                if state and state.status == "PENDING_APPROVAL":
-                    store_obj, sku_obj = _resolve_store_and_sku(
-                        state.store_id, state.sku_id, state.sku_name
-                    )
-                    pr = sap_svc.create_purchase_requisition(
-                        store=store_obj,
-                        sku=sku_obj,
-                        quantity=new_qty,
-                        idempotency_key=req_id,
-                    )
-                    db.update_approval_state(
-                        req_id, "EDITED", final_qty=new_qty, sap_pr_id=pr["pr_number"]
-                    )
+                if state and state.status == "EDIT_REQUESTED":
+                    _enqueue_approved_request(state, chat_id, new_qty)
                     _send_tg_text(
                         chat_id,
                         f"✅ *KUOTA DIREVISI & DISETUJUI*\n"
                         f"━━━━━━━━━━━━━━━━━━━━━━\n"
-                        f"🏷️ *SKU:* {sku_obj.sku_name}\n"
+                        f"🏷️ *SKU:* {state.sku_name or state.sku_id}\n"
                         f"📦 *Kuota Baru:* `{new_qty} Pcs` (Rekomendasi awal: {state.recommended_qty})\n"
-                        f"💰 *Total Nilai:* `Rp {pr['total_amount']:,.0f}`\n"
-                        f"📄 *No. PR SAP:* `{pr['pr_number']}`\n"
-                        f"📡 *Status SAP:* `{pr['status']}`",
+                        "📬 *Status:* Menunggu worker SAP (SQS)",
                     )
-                del TELEGRAM_SESSIONS[chat_id]
+                db.delete_telegram_session(chat_id)
             except ValueError:
                 _send_tg_text(
                     chat_id, "Masukkan angka bulat positif yang valid (1 - 100000)."
@@ -1144,6 +827,9 @@ def scheduled_evaluation_worker():
 
 @app.on_event("startup")
 def start_background_tasks():
+    if not config.ENABLE_LEGACY_BACKGROUND_WORKERS:
+        logger.info("Legacy workers disabled; use Telegram webhook and EventBridge.")
+        return
     t_tg = threading.Thread(target=telegram_polling_worker, daemon=True)
     t_tg.start()
     t_sched = threading.Thread(target=scheduled_evaluation_worker, daemon=True)

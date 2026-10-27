@@ -1,0 +1,13 @@
+environment          = "production"
+aws_region           = "us-east-1"
+expected_account_id  = "000000000000"
+project_name         = "autoreplenish"
+confirm_production   = false
+enable_sap_write     = false
+enable_eventbridge   = true
+lambda_artifact_path = "../../build/lambda.zip"
+secret_name          = "autoreplenish/production/application"
+bedrock_model_id     = "<approved-bedrock-model-id>"
+bedrock_model_arn    = "<approved-bedrock-model-or-inference-profile-arn>"
+allowed_origins      = ["https://<production-dashboard-domain>"]
+alarm_sns_topic_arn  = "<production-alarm-sns-topic-arn>"

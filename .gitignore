@@ -35,3 +35,18 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
+# Terraform state, providers, plans, and local variable files
+infra/terraform/.terraform/
+infra/terraform/*.tfstate
+infra/terraform/*.tfstate.*
+infra/terraform/*.tfplan
+infra/terraform/*.plan
+infra/terraform/*.tfvars
+!infra/terraform/*.tfvars.example
+
+# Lambda build artifacts
+build/
+
+# Local secret payloads used only for Secrets Manager uploads
+*-secrets.json
+secrets*.json

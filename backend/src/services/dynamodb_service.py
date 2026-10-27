@@ -11,11 +11,16 @@ logger = logging.getLogger("autoreplenish.dynamodb")
 
 # Aturan State Machine Resmi (P1 #14)
 VALID_STATE_TRANSITIONS = {
+    # Legacy persisted states may still use SAP_SUBMITTING; new production
+    # flow must use APPROVED -> ENQUEUED -> SAP worker.
     "PENDING_APPROVAL": {"APPROVED", "EDIT_REQUESTED", "REJECTED", "SAP_SUBMITTING", "TIMEOUT"},
-    "EDIT_REQUESTED": {"APPROVED", "EDITED", "REJECTED", "SAP_SUBMITTING", "TIMEOUT"},
-    "APPROVED": {"SAP_SUBMITTING", "SAP_SUBMITTED", "SAP_FAILED"},
-    "SAP_SUBMITTING": {"SAP_SUBMITTED", "SAP_FAILED", "EDITED"},
-    "SAP_FAILED": {"SAP_SUBMITTING", "SAP_SUBMITTED"},
+    "EDIT_REQUESTED": {"APPROVED", "REJECTED", "TIMEOUT"},
+    "APPROVED": {"ENQUEUED", "QUEUE_FAILED", "SAP_SUBMITTING"},
+    "QUEUE_FAILED": {"ENQUEUED", "APPROVED"},
+    "ENQUEUED": {"PROCESSING", "SAP_SUBMITTING", "QUEUE_FAILED"},
+    "PROCESSING": {"SAP_SUBMITTING", "SAP_FAILED"},
+    "SAP_SUBMITTING": {"SAP_SUBMITTED", "SAP_SANDBOX_VERIFIED", "SAP_DRY_RUN", "SAP_FAILED"},
+    "SAP_FAILED": {"ENQUEUED", "SAP_SUBMITTING", "SAP_SUBMITTED"},
 }
 
 
@@ -236,7 +241,10 @@ class DynamoDBService:
     ):
         return self.transition_approval_state(
             request_id=request_id,
-            expected_current_statuses=["PENDING_APPROVAL", "EDIT_REQUESTED", "SAP_SUBMITTING", "APPROVED"],
+            expected_current_statuses=[
+                "PENDING_APPROVAL", "EDIT_REQUESTED", "SAP_SUBMITTING", "APPROVED",
+                "QUEUE_FAILED", "ENQUEUED", "PROCESSING", "SAP_FAILED",
+            ],
             new_status=new_status,
             final_qty=final_qty,
             sap_pr_id=sap_pr_id,

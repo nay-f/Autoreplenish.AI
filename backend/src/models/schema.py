@@ -80,6 +80,7 @@ class AIRecommendation(BaseModel):
     model_id: str = ""
     prompt_version: str = ""
     latency_ms: int = 0
+    failure_class: Optional[str] = None
 
     @field_validator("risk_level", mode="before")
     @classmethod
@@ -93,15 +94,21 @@ class TelegramApprovalState(BaseModel):
     store_id: str
     sku_id: str
     sku_name: str = ""
-    recommended_qty: int = Field(ge=0)
-    final_qty: Optional[int] = Field(default=None, ge=0)
+    recommended_qty: int = Field(ge=0, le=100000)
+    final_qty: Optional[int] = Field(default=None, ge=0, le=100000)
     status: Literal[
         "PENDING_APPROVAL",
+        "EDIT_REQUESTED",
         "APPROVED",
+        "QUEUE_FAILED",
         "EDITED",
         "REJECTED",
+        "ENQUEUED",
+        "PROCESSING",
         "SAP_SUBMITTING",
         "SAP_SUBMITTED",
+        "SAP_SANDBOX_VERIFIED",
+        "SAP_DRY_RUN",
         "SAP_FAILED",
         "TIMEOUT",
     ] = "PENDING_APPROVAL"

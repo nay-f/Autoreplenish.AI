@@ -139,6 +139,8 @@ class OrchestratorService:
                     "warnings": ai_rec.warnings,
                     "guardrail_applied": ai_rec.guardrail_applied,
                     "is_fallback": ai_rec.is_fallback,
+                    "bedrock_failure_class": ai_rec.failure_class,
+                    "evaluation_status": "DETERMINISTIC_FALLBACK" if ai_rec.is_fallback else "BEDROCK_SUCCESS",
                     "model_id": ai_rec.model_id,
                     "prompt_version": ai_rec.prompt_version,
                     "rule_engine_version": config.RULE_ENGINE_VERSION,

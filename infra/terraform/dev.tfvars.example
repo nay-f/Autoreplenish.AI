@@ -1,0 +1,10 @@
+environment          = "development"
+aws_region           = "us-east-1"
+expected_account_id  = "000000000000"
+project_name         = "autoreplenish"
+confirm_production   = false
+enable_sap_write     = false
+enable_eventbridge   = false
+lambda_artifact_path = "../../build/lambda.zip"
+bedrock_model_id     = "<approved-bedrock-model-id>"
+allowed_origins      = ["http://localhost:5173"]

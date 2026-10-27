@@ -197,7 +197,12 @@ class BedrockReasoningService:
 
         except Exception as e:
             latency_ms = int((time.time() - start_time) * 1000)
-            logger.error("Pemanggilan Bedrock gagal (%s), mengaktifkan deterministic fallback.", e)
+            failure_class = self._classify_failure(e)
+            logger.error(
+                "Bedrock %s (%s), mengaktifkan deterministic fallback.",
+                failure_class,
+                e,
+            )
             return AIRecommendation(
                 recommended_qty=baseline_qty,
                 normal_qty=baseline_qty,
@@ -212,10 +217,28 @@ class BedrockReasoningService:
                     f"ditambah proyeksi konsumsi selama lead time {sku.lead_time_days} hari ({baseline_info['lead_time_demand']} unit)."
                 ),
                 key_factors=["deterministic_baseline_fallback"],
-                warnings=["Mode fallback deterministik aktif karena gangguan koneksi LLM."],
+                warnings=[
+                    f"Mode fallback deterministik aktif ({failure_class}). Wajib verifikasi manusia."
+                ],
                 guardrail_applied=True,
                 is_fallback=True,
                 model_id=self.model_id,
                 prompt_version=self.prompt_version,
                 latency_ms=latency_ms,
+                failure_class=failure_class,
             )
+
+    @staticmethod
+    def _classify_failure(error: Exception) -> str:
+        """Return an operational category without exposing provider details."""
+        name = type(error).__name__.lower()
+        message = str(error).lower()
+        if "accessdenied" in name or "access denied" in message:
+            return "BEDROCK_AUTHORIZATION_ERROR"
+        if "validation" in name or "validationexception" in message:
+            return "BEDROCK_OUTPUT_OR_REQUEST_VALIDATION_ERROR"
+        if "json" in name or "json" in message:
+            return "BEDROCK_INVALID_JSON"
+        if "timeout" in name or "timeout" in message:
+            return "BEDROCK_TIMEOUT"
+        return "BEDROCK_INVOCATION_ERROR"

@@ -73,8 +73,11 @@ class SAPService:
         - Jika endpoint OData S/4HANA live dikonfigurasi, melakukan CSRF Fetch + HTTP POST nyata.
         - Menyimpan status transaksi aktual (SAP_SUBMITTED, BTP_VERIFIED_SANDBOX_PR, atau SAP_FAILED).
         """
-        # 1. Verifikasi token OAuth2 SAP BTP
-        token = self.get_access_token()
+        # 1. Development/staging safety: never perform SAP OAuth/OData write
+        # unless the deployment explicitly enables it.
+        token = None
+        if config.SAP_WRITE_ENABLED:
+            token = self.get_access_token()
 
         # 2. Generate nomor referensi PR berbasis idempotency key agar tidak duplikat
         short_hash = idempotency_key[-6:].upper() if idempotency_key else uuid.uuid4().hex[:6].upper()
@@ -104,14 +107,19 @@ class SAPService:
             }
         }
 
-        submission_status = "BTP_VERIFIED_SANDBOX_PR"
+        submission_status = "SAP_DRY_RUN" if not config.SAP_WRITE_ENABLED else "BTP_VERIFIED_SANDBOX_PR"
         http_status_code = 200
-        sap_response_excerpt = "Token OAuth2 SAP BTP valid; dokumen PR disimpan pada persistent store."
+        sap_response_excerpt = (
+            "SAP write disabled; payload PR hanya disimpan untuk dry-run."
+            if not config.SAP_WRITE_ENABLED
+            else "Token OAuth2 SAP BTP valid; dokumen PR disimpan pada persistent store."
+        )
 
         # 4. Jika toko mengaktifkan SAP_BTP dan memiliki URL OData non-sandbox yang dapat di-POST
         odata_url = (store.sap_odata_url or "").strip()
         if (
-            store.ingestion_mode == "SAP_BTP"
+            config.SAP_WRITE_ENABLED
+            and store.ingestion_mode == "SAP_BTP"
             and odata_url
             and "sandbox.api.sap.com" not in odata_url
         ):
@@ -129,9 +137,12 @@ class SAPService:
                     headers={**headers, "X-CSRF-Token": "Fetch"},
                     timeout=(5, 10),
                 )
+                if csrf_resp.status_code >= 400:
+                    raise RuntimeError(f"SAP CSRF fetch gagal (HTTP {csrf_resp.status_code}).")
                 csrf_token = csrf_resp.headers.get("X-CSRF-Token")
-                if csrf_token:
-                    headers["X-CSRF-Token"] = csrf_token
+                if not csrf_token:
+                    raise RuntimeError("SAP CSRF token tidak dikembalikan oleh endpoint.")
+                headers["X-CSRF-Token"] = csrf_token
 
                 post_resp = session.post(
                     f"{odata_url.rstrip('/')}/A_PurchaseRequisitionHeader",

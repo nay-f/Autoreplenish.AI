@@ -1,0 +1,49 @@
+name: AutoReplenish CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install test dependencies
+        run: python -m pip install -r backend/requirements.txt
+      - name: Compile
+        run: python -m compileall -q backend tests
+      - name: Test
+        run: python -m pytest -q
+
+  terraform:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+      - name: Create non-deploy placeholder artifact
+        run: |
+          mkdir -p build
+          python - <<'PY'
+          import zipfile
+          with zipfile.ZipFile("build/lambda.zip", "w") as archive:
+              archive.writestr("backend/.ci-placeholder", "validation only")
+          PY
+      - name: Terraform format check
+        working-directory: infra/terraform
+        run: terraform fmt -check -recursive
+      - name: Terraform init without backend
+        working-directory: infra/terraform
+        run: terraform init -backend=false -input=false
+      - name: Terraform validate
+        working-directory: infra/terraform
+        run: terraform validate -no-color
