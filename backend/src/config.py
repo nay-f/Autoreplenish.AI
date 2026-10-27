@@ -1,72 +1,53 @@
-"""Configuration & Environment Settings for AutoReplenish.ai.
-
-All credentials are resolved lazily at call time (never at import time) so that
-the module can be imported inside test runners without AWS credentials present.
-Values are sourced, in priority order:
-    1. Lambda environment variables (see infra/lambda.tf)
-    2. AWS Secrets Manager (fetched by the owning service, cached per warm container)
-    3. Explicit defaults for non-secret operational constants
-"""
-
 import os
-import logging
-from typing import Dict
+import bcrypt
+from dotenv import load_dotenv
 
-LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
-logging.basicConfig(
-    level=getattr(logging, LOG_LEVEL, logging.INFO),
-    format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s"
-)
-logger = logging.getLogger("AutoReplenish")
+load_dotenv()
 
-# AWS and Environment Constants
-ENVIRONMENT = os.environ.get("ENVIRONMENT", "dev")
-AWS_REGION = os.environ.get("AWS_REGION", "ap-southeast-1")
-DYNAMODB_TABLE = os.environ.get("DYNAMODB_TABLE", f"autoreplenish-main-{ENVIRONMENT}")
-BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "anthropic.claude-3-5-sonnet-20241022-v2:0")
+# AWS Configuration
+AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
+AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
+AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
+DYNAMODB_TABLE = os.getenv("DYNAMODB_TABLE", "AutoReplenish_CoreTable")
+BEDROCK_MODEL_ID = os.getenv("BEDROCK_MODEL_ID", "us.anthropic.claude-3-5-sonnet-20241022-v2:0")
 
-# Secret Names (Secrets Manager ARNs are created in infra/secrets.tf)
-WEATHER_SECRET_NAME = os.environ.get("WEATHER_SECRET_NAME", f"autoreplenish/weather-credentials-{ENVIRONMENT}")
-TELEGRAM_SECRET_NAME = os.environ.get("TELEGRAM_SECRET_NAME", f"autoreplenish/telegram-credentials-{ENVIRONMENT}")
-SAP_SECRET_NAME = os.environ.get("SAP_SECRET_NAME", f"autoreplenish/sap-credentials-{ENVIRONMENT}")
-SAP_PR_QUEUE_URL = os.environ.get("SAP_PR_QUEUE_URL", "")
+# External Signal Credentials
+OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY", "")
 
-# -------------------------------------------------------------
-# External Signal: OpenWeatherMap (PRD Section 14.3)
-# -------------------------------------------------------------
-OPENWEATHERMAP_BASE_URL = os.environ.get(
-    "OPENWEATHERMAP_BASE_URL", "https://api.openweathermap.org/data/2.5"
-)
-# Generic fallback coordinates (Jakarta Pusat), used by WeatherService ONLY when a
-# store has no latitude/longitude in its master data. Per-store coordinates live
-# in the store profile (backend/src/data/seed_stores.json), not here.
-OPENWEATHERMAP_LAT = os.environ.get("OPENWEATHERMAP_LAT", "-6.2088")
-OPENWEATHERMAP_LON = os.environ.get("OPENWEATHERMAP_LON", "106.8456")
-OPENWEATHERMAP_UNITS = os.environ.get("OPENWEATHERMAP_UNITS", "metric")
-OPENWEATHERMAP_TIMEOUT_SECONDS = float(os.environ.get("OPENWEATHERMAP_TIMEOUT_SECONDS", "5"))
-OPENWEATHERMAP_MAX_RETRIES = int(os.environ.get("OPENWEATHERMAP_MAX_RETRIES", "3"))
+# Telegram Configuration
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_DEFAULT_CHAT_ID = os.getenv("TELEGRAM_DEFAULT_CHAT_ID", "")
 
-# -------------------------------------------------------------
-# Telegram Bot API (PRD Section 14.4)
-# -------------------------------------------------------------
-TELEGRAM_API_BASE_URL = os.environ.get("TELEGRAM_API_BASE_URL", "https://api.telegram.org")
-TELEGRAM_TIMEOUT_SECONDS = float(os.environ.get("TELEGRAM_TIMEOUT_SECONDS", "10"))
-# Optional hardcoded fallback for the local demo environment only.
-# In Lambda the token is read from Secrets Manager and never from the environment.
-TELEGRAM_BOT_TOKEN_FALLBACK = os.environ.get("TELEGRAM_BOT_TOKEN_FALLBACK", "")
+# SAP BTP Credentials
+SAP_TOKEN_URL = os.getenv("SAP_TOKEN_URL", "")
+SAP_CLIENT_ID = os.getenv("SAP_CLIENT_ID", "")
+SAP_CLIENT_SECRET = os.getenv("SAP_CLIENT_SECRET", "")
+SAP_AI_API_URL = os.getenv("SAP_AI_API_URL", "")
 
-# -------------------------------------------------------------
-# Business Logic Defaults
-# -------------------------------------------------------------
-WEATHER_CACHE_TTL_HOURS = int(os.environ.get("WEATHER_CACHE_TTL_HOURS", "6"))
-WEATHER_CACHE_VALID_HOURS = int(os.environ.get("WEATHER_CACHE_VALID_HOURS", "3"))
-APPROVAL_TIMEOUT_HOURS = int(os.environ.get("APPROVAL_TIMEOUT_HOURS", "4"))
-MAX_BEDROCK_RETRIES = int(os.environ.get("MAX_BEDROCK_RETRIES", "2"))
-BEDROCK_MAX_TOKENS = int(os.environ.get("BEDROCK_MAX_TOKENS", "1024"))
-BEDROCK_TEMPERATURE = float(os.environ.get("BEDROCK_TEMPERATURE", "0.2"))
-PROMPT_VERSION = os.environ.get("PROMPT_VERSION", "v1.0")
+# Security, JWT & CORS Configuration
+JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "change-this-in-production-immediately")
+JWT_ALGORITHM = "HS256"
+JWT_EXPIRE_HOURS = int(os.getenv("JWT_EXPIRE_HOURS", "8"))
 
+ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv("ALLOWED_ORIGINS", "http://localhost:5173").split(",")
+    if origin.strip()
+]
 
-def get_env(name: str, default: str = "") -> str:
-    """Read an environment variable, tolerating missing/blank values."""
-    return (os.environ.get(name) or "").strip() or default
+ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
+_RAW_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin123")
+# Simpan dalam bentuk bcrypt hash di memori runtime
+ADMIN_PASSWORD_HASH = bcrypt.hashpw(_RAW_PASSWORD.encode("utf-8"), bcrypt.gensalt())
+
+# AI Governance & Versioning (Fase 3)
+PROMPT_VERSION = os.getenv("PROMPT_VERSION", "v2.0-pareto-hybrid")
+RULE_ENGINE_VERSION = os.getenv("RULE_ENGINE_VERSION", "v1.2-moq-guardrail")
+
+# Batas pengali keamanan (AI tidak boleh merekomendasikan > 2.5x dari kebutuhan baseline normal)
+AI_MAX_MULTIPLIER_CAP = float(os.getenv("AI_MAX_MULTIPLIER_CAP", "2.5"))
+AI_MIN_MULTIPLIER_FLOOR = float(os.getenv("AI_MIN_MULTIPLIER_FLOOR", "0.3"))
+
+# Kebijakan Confidence Threshold
+CONFIDENCE_HIGH_THRESHOLD = 0.85
+CONFIDENCE_MIN_ACCEPTABLE = 0.60

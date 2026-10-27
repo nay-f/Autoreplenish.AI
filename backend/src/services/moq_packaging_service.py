@@ -1,96 +1,46 @@
-"""MOQ and Packaging Multiple Adjustment Service.
-
-Implements PRD Section 11.6 and 15.2:
-- Adjusts AI raw recommended quantity to valid procurement quantities (MOQ and case/pack multiples).
-- Conservative rounding rules for perishable SKUs to prevent spoilage.
-"""
-
 import math
-from typing import Tuple
-from ..config import logger
+from backend.src.models.schema import SKUItem
 
-class MoqPackagingService:
-    """Calculates procurement-compliant order quantities."""
-
+class MOQPackagingService:
     @staticmethod
-    def adjust_quantity(
-        raw_qty: int,
-        moq: int,
-        packaging_multiple: int,
-        category: str = "Non-Perishable",
-        risk_level: str = "medium",
-        area_type: str = "Perkantoran",
-        weather_condition: str = "Cerah",
-        shelf_life_days: int = 365,
-        is_fragile: bool = False
-    ) -> Tuple[int, bool, bool, str]:
+    def adjust_quantity(sku: SKUItem, ai_qty: int, risk_level: str = "medium") -> dict:
         """
-        Adjust raw quantity.
-        Returns:
-            final_qty (int): adjusted procurement quantity
-            moq_applied (bool): whether MOQ forced an increase
-            packaging_applied (bool): whether packaging multiple adjusted the qty
-            note (str): explanation of adjustment
+        Menyesuaikan kuota order AI terhadap aturan MOQ dan packaging multiple:
+        - Non-Perishable: Dibulatkan ke atas (round up) ke kelipatan kardus terdekat.
+        - Perishable + Risiko Tinggi (Cuaca buruk/weekend sepi): Dibulatkan konservatif ke bawah
+          untuk menghindari overstock/spoilage.
         """
-        if raw_qty <= 0:
-            return 0, False, False, "Kebutuhan stok terpenuhi (0 pcs)"
+        moq = max(sku.moq, 1)
+        multiple = max(sku.packaging_multiple, 1)
+        
+        # Jika AI merekomendasikan 0, tidak perlu order
+        if ai_qty <= 0:
+            return {
+                "final_qty": 0,
+                "moq_applied": False,
+                "packaging_multiple_applied": False,
+                "note": "AI merekomendasikan tidak ada order saat ini"
+            }
 
-        moq = max(1, moq)
-        packaging_multiple = max(1, packaging_multiple)
-        is_perishable = category.lower() == "perishable"
-        short_shelf_life = shelf_life_days <= 3
+        # Evaluasi terhadap MOQ minimal
+        base_qty = max(ai_qty, moq)
+        moq_applied = (ai_qty < moq)
 
-        moq_applied = False
-        packaging_applied = False
-        adjusted_qty = raw_qty
+        # Penyesuaian kelipatan kemasan
+        if sku.is_perishable and risk_level == "high":
+            # Pembulatan konservatif ke bawah untuk barang mudah rusak saat situasi berisiko
+            batches = math.floor(base_qty / multiple)
+            final_qty = max(batches * multiple, moq)
+            note = f"Disesuaikan konservatif ke {final_qty} unit untuk menekan risiko kedaluwarsa"
+        else:
+            # Pembulatan ke atas (round up) standar logistik
+            batches = math.ceil(base_qty / multiple)
+            final_qty = batches * multiple
+            note = f"Dibulatkan ke atas mengikuti kelipatan kemasan ({multiple} unit/dus)"
 
-        # 1. Evaluate MOQ
-        if adjusted_qty < moq:
-            adjusted_qty = moq
-            moq_applied = True
-            if is_perishable and risk_level == "high":
-                logger.info(
-                    f"Perishable SKU under MOQ ({raw_qty} < {moq}) with high risk. "
-                    f"Flooring to the smallest valid pack {packaging_multiple}."
-                )
-                if packaging_multiple > raw_qty:
-                    adjusted_qty = packaging_multiple
-
-        # 2. Packaging multiple rounding
-        rem = adjusted_qty % packaging_multiple
-        if rem != 0:
-            packaging_applied = True
-
-            # Conservative (downward) rounding is applied to anything that
-            # spoils or breaks: perishables, short shelf life, or fragile goods.
-            conservative = is_perishable or short_shelf_life or is_fragile
-
-            if conservative and risk_level in ("high", "medium"):
-                round_down_qty = (adjusted_qty // packaging_multiple) * packaging_multiple
-                round_up_qty = round_down_qty + packaging_multiple
-
-                if round_down_qty >= moq and (round_up_qty - adjusted_qty) > (packaging_multiple / 2):
-                    adjusted_qty = round_down_qty
-                    driver = []
-                    if is_perishable:
-                        driver.append("perishable")
-                    if short_shelf_life:
-                        driver.append(f"shelf life {shelf_life_days} hari")
-                    if is_fragile:
-                        driver.append("barang mudah pecah")
-                    note = f"Dibulatkan ke bawah ({adjusted_qty} pcs) untuk mencegah kerugian ({', '.join(driver)})"
-                    return adjusted_qty, moq_applied, packaging_applied, note
-                adjusted_qty = round_up_qty
-            else:
-                # Non-perishable standard: round up to next multiple
-                adjusted_qty = math.ceil(adjusted_qty / packaging_multiple) * packaging_multiple
-
-        note = "Sesuai kelipatan kemasan" if packaging_applied else "Sesuai kebutuhan rekomendasi"
-        if moq_applied:
-            note += f" (Disesuaikan ke MOQ {moq})"
-        if is_fragile:
-            note += " — penanganan hati-hati (mudah pecah)"
-        if short_shelf_life:
-            note += f" — perhatikan shelf life {shelf_life_days} hari"
-
-        return adjusted_qty, moq_applied, packaging_applied, note
+        return {
+            "final_qty": final_qty,
+            "moq_applied": moq_applied,
+            "packaging_multiple_applied": (final_qty != ai_qty),
+            "note": note
+        }

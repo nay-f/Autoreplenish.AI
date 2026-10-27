@@ -1,41 +1,37 @@
-# 1. AI Agent Workspace & Internal Logs
-.agent/
-.antigravity/
-*.log
-*.tmp
-
-# 2. Demo Sandbox & Local Databases (EXCLUDED FROM GIT)
-demo/
-demo.db
-*.db
-*.sqlite
-
-# 3. Environments & Secrets
+# Environment files and secrets
 .env
 .env.*
 !.env.example
-*.pem
 
-# 4. Build Artifacts & Dependencies
-node_modules/
-dist/
-build/
+# Existing secret/config files
+.env.secret
+.env.production
+
+# Python
 __pycache__/
-*.pyc
-.pytest_cache/
-backend/build/
-cashier/dist/
+*.py[cod]
+venv/
+
+# Frontend
+dashboard/node_modules/
 dashboard/dist/
 
-# 5. OS & IDE
-.DS_Store
-.idea/
-.vscode/
-*.swp
-*.swo
+# Kaggle datasets and generated backtesting output
+datasets/raw/*
+!datasets/raw/.gitkeep
+datasets/processed/*
+!datasets/processed/.gitkeep
+datasets/reports/*
+!datasets/reports/.gitkeep
 
-# 6. Terraform
-**/.terraform/*
-*.tfstate
-*.tfstate.*
-.terraform/
+# Cache, Testing & Logs
+.pytest_cache/
+.coverage
+htmlcov/
+*.log
+*.sqlite
+*.sqlite3
+*.db
+.DS_Store
+Thumbs.db
+
