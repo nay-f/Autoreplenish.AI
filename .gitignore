@@ -2,6 +2,9 @@
 .env
 .env.*
 !.env.example
+dashboard/.env
+dashboard/.env.*
+!dashboard/.env.example
 
 # Existing secret/config files
 .env.secret
@@ -50,3 +53,14 @@ build/
 # Local secret payloads used only for Secrets Manager uploads
 *-secrets.json
 secrets*.json
+
+# Local CLI tools & binaries
+cf-cli/
+
+# Local docs, reviews, and scratch files (kept on local workstation)
+docs/
+scripts/scratch/
+
+# SAP BTP Cloud Foundry manifest with live secrets
+sap-btp-service/manifest.yml
+!sap-btp-service/manifest.yml.example

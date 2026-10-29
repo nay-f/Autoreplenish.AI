@@ -11,6 +11,9 @@ data "aws_iam_policy_document" "lambda_assume_role" {
   }
 }
 
+# ==========================================
+# 1. SAP WORKER IAM ROLE & POLICY
+# ==========================================
 resource "aws_iam_role" "sap_worker" {
   name               = "${local.name_prefix}-sap-worker"
   assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
@@ -23,8 +26,8 @@ resource "aws_iam_role_policy" "sap_worker" {
     Version = "2012-10-17"
     Statement = [
       {
-        Effect = "Allow"
-        Action = ["logs:CreateLogStream", "logs:PutLogEvents"]
+        Effect   = "Allow"
+        Action   = ["logs:CreateLogStream", "logs:PutLogEvents"]
         Resource = "arn:aws:logs:${var.aws_region}:*:log-group:/aws/lambda/${local.name_prefix}-sap-worker:*"
       },
       {
@@ -46,6 +49,9 @@ resource "aws_iam_role_policy" "sap_worker" {
   })
 }
 
+# ==========================================
+# 2. ORCHESTRATOR IAM ROLE & POLICY
+# ==========================================
 resource "aws_iam_role" "orchestrator" {
   name               = "${local.name_prefix}-orchestrator"
   assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
@@ -58,8 +64,8 @@ resource "aws_iam_role_policy" "orchestrator" {
     Version = "2012-10-17"
     Statement = [
       {
-        Effect = "Allow"
-        Action = ["logs:CreateLogStream", "logs:PutLogEvents"]
+        Effect   = "Allow"
+        Action   = ["logs:CreateLogStream", "logs:PutLogEvents"]
         Resource = "arn:aws:logs:${var.aws_region}:*:log-group:/aws/lambda/${local.name_prefix}-orchestrator:*"
       },
       {
@@ -74,34 +80,35 @@ resource "aws_iam_role_policy" "orchestrator" {
       },
       {
         Effect   = "Allow"
+        Action   = ["bedrock:ListFoundationModels", "bedrock:GetFoundationModel"]
+        Resource = "*"
+      },
+      {
+        Effect   = "Allow"
         Action   = ["sqs:SendMessage"]
         Resource = aws_sqs_queue.scheduler_dlq.arn
       },
       {
-        Effect   = "Allow"
-        Action   = ["bedrock:InvokeModel"]
-        Resource = var.bedrock_model_arn != "" ? var.bedrock_model_arn : "*"
+        Effect = "Allow"
+        Action = [
+          "bedrock:InvokeModel",
+          "bedrock:InvokeModelWithResponseStream"
+        ]
+        Resource = [
+          "arn:aws:bedrock:*::foundation-model/*",
+          "arn:aws:bedrock:*:*:inference-profile/*"
+        ]
       }
     ]
   })
 }
 
-data "aws_iam_policy_document" "webhook_assume_role" {
-  statement {
-    effect = "Allow"
-
-    principals {
-      type        = "Service"
-      identifiers = ["lambda.amazonaws.com"]
-    }
-
-    actions = ["sts:AssumeRole"]
-  }
-}
-
+# ==========================================
+# 3. TELEGRAM WEBHOOK IAM ROLE & POLICY
+# ==========================================
 resource "aws_iam_role" "webhook" {
   name               = "${local.name_prefix}-telegram-webhook"
-  assume_role_policy = data.aws_iam_policy_document.webhook_assume_role.json
+  assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
 }
 
 resource "aws_iam_role_policy" "webhook" {
@@ -127,13 +134,26 @@ resource "aws_iam_role_policy" "webhook" {
       },
       {
         Effect   = "Allow"
+        Action   = ["lambda:InvokeFunction"]
+        Resource = aws_lambda_function.orchestrator.arn
+      },
+      {
+        Effect   = "Allow"
         Action   = ["secretsmanager:GetSecretValue"]
         Resource = aws_secretsmanager_secret.application.arn
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["bedrock:ListFoundationModels", "bedrock:GetFoundationModel"]
+        Resource = "*"
       }
     ]
   })
 }
 
+# ==========================================
+# 4. DASHBOARD API IAM ROLE & POLICY
+# ==========================================
 resource "aws_iam_role" "dashboard" {
   name               = "${local.name_prefix}-dashboard-api"
   assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
@@ -159,11 +179,30 @@ resource "aws_iam_role_policy" "dashboard" {
         Effect   = "Allow"
         Action   = ["secretsmanager:GetSecretValue"]
         Resource = aws_secretsmanager_secret.application.arn
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["bedrock:ListFoundationModels", "bedrock:GetFoundationModel"]
+        Resource = "*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "bedrock:InvokeModel",
+          "bedrock:InvokeModelWithResponseStream"
+        ]
+        Resource = [
+          "arn:aws:bedrock:*::foundation-model/*",
+          "arn:aws:bedrock:*:*:inference-profile/*"
+        ]
       }
     ]
   })
 }
 
+# ==========================================
+# OUTPUTS
+# ==========================================
 output "sap_worker_role_arn" {
   value = aws_iam_role.sap_worker.arn
 }

@@ -16,12 +16,25 @@ def test_queue_uses_fifo_group_and_request_deduplication():
     with patch("backend.src.services.approval_queue_service.boto3.client", return_value=sqs):
         with patch("backend.src.services.approval_queue_service.config.APPROVAL_QUEUE_URL", "https://sqs/approval.fifo"):
             result = ApprovalQueueService().enqueue("REQ-1", "STORE-1", "SKU-1", 12, "chat-1")
-
     kwargs = sqs.send_message.call_args.kwargs
     assert kwargs["MessageGroupId"] == "STORE-1"
     assert kwargs["MessageDeduplicationId"] == "REQ-1"
     assert json.loads(kwargs["MessageBody"])["schema_version"] == "1.0"
     assert result["message_id"] == "msg-1"
+
+
+def test_queue_carries_telegram_message_reference_for_worker_callback():
+    sqs = Mock()
+    sqs.send_message.return_value = {"MessageId": "msg-2"}
+    with patch("backend.src.services.approval_queue_service.boto3.client", return_value=sqs):
+        with patch("backend.src.services.approval_queue_service.config.APPROVAL_QUEUE_URL", "https://sqs/approval.fifo"):
+            ApprovalQueueService().enqueue(
+                "REQ-2", "STORE-2", "SKU-2", 24, "chat-2",
+                chat_id="chat-2", message_id=987,
+            )
+    body = json.loads(sqs.send_message.call_args.kwargs["MessageBody"])
+    assert body["chat_id"] == "chat-2"
+    assert body["message_id"] == 987
 
 
 def test_queue_rejects_non_fifo_queue():
@@ -33,13 +46,8 @@ def test_queue_rejects_non_fifo_queue():
 
 def _state(status="ENQUEUED"):
     return SimpleNamespace(
-        request_id="REQ-1",
-        store_id="STORE-1",
-        sku_id="SKU-1",
-        sku_name="SKU One",
-        final_qty=None,
-        recommended_qty=12,
-        status=status,
+        request_id="REQ-1", store_id="STORE-1", sku_id="SKU-1", sku_name="SKU One",
+        final_qty=None, recommended_qty=12, status=status,
     )
 
 
@@ -48,12 +56,10 @@ def test_worker_replay_after_success_is_idempotent():
     db.get_approval_state.side_effect = [_state("SAP_SUBMITTED"), _state("SAP_SUBMITTED")]
     sap = Mock()
     worker = SAPWorkerService(db=db, sap=sap)
-
     result = worker.process(
         {"request_id": "REQ-1", "quantity": 12, "environment": "development"},
         lambda *_: (SimpleNamespace(store_id="STORE-1"), SimpleNamespace(sku_id="SKU-1")),
     )
-
     assert result == {"request_id": "REQ-1", "status": "SAP_SUBMITTED", "duplicate": True}
     sap.create_purchase_requisition.assert_not_called()
 
@@ -63,20 +69,57 @@ def test_worker_dry_run_failure_does_not_call_sap_network_write():
     db.get_approval_state.return_value = _state("ENQUEUED")
     db.transition_approval_state.side_effect = [True, True]
     sap = Mock()
-    sap.create_purchase_requisition.return_value = {
-        "status": "SAP_DRY_RUN",
-        "pr_number": "PR-DRY-1",
-    }
+    sap.create_purchase_requisition.return_value = {"status": "SAP_DRY_RUN", "pr_number": "PR-DRY-1"}
     worker = SAPWorkerService(db=db, sap=sap)
-
     result = worker.process(
         {"request_id": "REQ-1", "quantity": 12, "environment": "development"},
         lambda *_: (SimpleNamespace(store_id="STORE-1"), SimpleNamespace(sku_id="SKU-1")),
     )
-
     assert result["status"] == "SAP_DRY_RUN"
     assert sap.create_purchase_requisition.call_count == 1
     assert db.transition_approval_state.call_args_list[-1].kwargs["new_status"] == "SAP_DRY_RUN"
+
+
+def test_worker_updates_original_telegram_message_after_sap_result():
+    db = Mock()
+    db.get_approval_state.return_value = _state("ENQUEUED")
+    db.transition_approval_state.return_value = True
+    sap = Mock()
+    sap.create_purchase_requisition.return_value = {"status": "SAP_SUBMITTED", "pr_number": "PR-1001"}
+    telegram = Mock()
+    telegram.edit_message_text.return_value = True
+    worker = SAPWorkerService(db=db, sap=sap, telegram=telegram)
+    result = worker.process(
+        {"request_id": "REQ-1", "quantity": 12, "environment": "development", "chat_id": "chat-1", "message_id": 123},
+        lambda *_: (SimpleNamespace(store_id="STORE-1"), SimpleNamespace(sku_id="SKU-1")),
+    )
+    assert result["status"] == "SAP_SUBMITTED"
+    telegram.edit_message_text.assert_called_once()
+    args = telegram.edit_message_text.call_args.args
+    assert args[:2] == ("chat-1", 123)
+    assert "PR-1001" in args[2]
+    telegram.send_text.assert_not_called()
+
+
+def test_worker_uses_telegram_reference_persisted_in_approval_state():
+    db = Mock()
+    state = _state("ENQUEUED")
+    state.telegram_chat_id = "chat-from-state"
+    state.telegram_message_id = 456
+    db.get_approval_state.return_value = state
+    db.transition_approval_state.return_value = True
+    sap = Mock()
+    sap.create_purchase_requisition.return_value = {"status": "SAP_DRY_RUN", "pr_number": "PR-DRY-2"}
+    telegram = Mock()
+    telegram.edit_message_text.return_value = True
+    worker = SAPWorkerService(db=db, sap=sap, telegram=telegram)
+    worker.process(
+        {"request_id": "REQ-1", "quantity": 12, "environment": "development"},
+        lambda *_: (SimpleNamespace(store_id="STORE-1"), SimpleNamespace(sku_id="SKU-1")),
+    )
+    args = telegram.edit_message_text.call_args.args
+    assert args[:2] == ("chat-from-state", 456)
+    assert "DRY-RUN" in args[2]
 
 
 def test_worker_failure_transitions_to_sap_failed_for_retry():
@@ -86,13 +129,11 @@ def test_worker_failure_transitions_to_sap_failed_for_retry():
     sap = Mock()
     sap.create_purchase_requisition.side_effect = TimeoutError("SAP timeout")
     worker = SAPWorkerService(db=db, sap=sap)
-
     with pytest.raises(TimeoutError):
         worker.process(
             {"request_id": "REQ-1", "quantity": 12, "environment": "development"},
             lambda *_: (SimpleNamespace(store_id="STORE-1"), SimpleNamespace(sku_id="SKU-1")),
         )
-
     assert db.transition_approval_state.call_args_list[-1].kwargs["new_status"] == "SAP_FAILED"
 
 
@@ -100,24 +141,17 @@ def test_sap_dry_run_does_not_request_oauth_or_post():
     db = Mock()
     service = SAPService(db_service=db)
     store = SimpleNamespace(
-        store_id="STORE-1",
-        store_name="Store One",
-        sap_plant="1000",
-        sap_storage_location="WH01",
-        sap_purchasing_org="1000",
-        ingestion_mode="SAP_BTP",
-        sap_odata_url="https://sandbox.example/odata",
+        store_id="STORE-1", store_name="Store One", sap_plant="1000",
+        sap_storage_location="WH01", sap_purchasing_org="1000",
+        ingestion_mode="SAP_BTP", sap_odata_url="https://sandbox.example/odata",
     )
     sku = SimpleNamespace(
-        sku_id="SKU-1",
-        sku_name="SKU One",
-        unit_price=10.0,
+        sku_id="SKU-1", sku_name="SKU One", unit_price=10.0,
         currency="IDR",
     )
     with patch("backend.src.services.sap_service.config.SAP_WRITE_ENABLED", False):
         with patch.object(service, "get_access_token") as token:
             result = service.create_purchase_requisition(store, sku, 12, "REQ-1")
-
     assert result["status"] == "SAP_DRY_RUN"
     token.assert_not_called()
     db.save_audit_log.assert_called_once()
@@ -133,12 +167,72 @@ def test_worker_rejects_cross_environment_message():
         )
 
 
+def test_telegram_recap_lists_all_chat_bound_stores():
+    stores = [
+        SimpleNamespace(store_id="STORE-1", telegram_chat_id="chat-1", active=True),
+        SimpleNamespace(store_id="STORE-2", telegram_chat_id="chat-1", active=True),
+        SimpleNamespace(store_id="STORE-3", telegram_chat_id="other-chat", active=True),
+    ]
+    with patch("backend.lambda_handlers.config.TELEGRAM_WEBHOOK_SECRET", "secret"):
+        with patch("backend.lambda_handlers.DynamoDBService") as db_factory:
+            db_factory.return_value.list_stores.return_value = stores
+            with patch("backend.src.services.orchestrator_service.OrchestratorService") as orchestrator_factory:
+                response = lambda_handlers.telegram_webhook_handler(
+                    {
+                        "headers": {"x-telegram-bot-api-secret-token": "secret"},
+                        "body": json.dumps({"message": {"text": "/recap", "chat": {"id": "chat-1"}}}),
+                    },
+                    None,
+                )
+    assert response["statusCode"] == 200
+    recap = orchestrator_factory.return_value.generate_and_send_daily_recap
+    assert [call.args[0] for call in recap.call_args_list] == ["STORE-1", "STORE-2"]
+
+
+def test_telegram_recap_command_reports_all_authorized_store_ids():
+    stores = [
+        SimpleNamespace(store_id="STORE-1", telegram_chat_id="chat-1", active=True),
+        SimpleNamespace(store_id="STORE-2", telegram_chat_id="chat-1", active=True),
+    ]
+    with patch("backend.lambda_handlers.config.TELEGRAM_WEBHOOK_SECRET", "secret"):
+        with patch("backend.lambda_handlers.DynamoDBService") as db_factory:
+            db_factory.return_value.list_stores.return_value = stores
+            with patch("backend.src.services.orchestrator_service.OrchestratorService"):
+                with patch("boto3.client") as lambda_client:
+                    response = lambda_handlers.telegram_webhook_handler(
+                        {
+                            "headers": {"x-telegram-bot-api-secret-token": "secret"},
+                            "body": json.dumps({"message": {"text": "/evaluasi", "chat": {"id": "chat-1"}}}),
+                        },
+                        None,
+                    )
+    assert response["statusCode"] == 200
+    assert json.loads(response["body"])["stores"] == ["STORE-1", "STORE-2"]
+    assert lambda_client.return_value.invoke.call_count == 2
+
+
+def test_telegram_command_rejects_store_outside_chat_binding():
+    stores = [SimpleNamespace(store_id="STORE-1", telegram_chat_id="chat-1", active=True)]
+    with patch("backend.lambda_handlers.config.TELEGRAM_WEBHOOK_SECRET", "secret"):
+        with patch("backend.lambda_handlers.DynamoDBService") as db_factory:
+            db_factory.return_value.list_stores.return_value = stores
+            with patch("backend.src.services.telegram_service.TelegramService") as telegram_factory:
+                response = lambda_handlers.telegram_webhook_handler(
+                    {
+                        "headers": {"x-telegram-bot-api-secret-token": "secret"},
+                        "body": json.dumps({"message": {"text": "/recap STORE-2", "chat": {"id": "chat-1"}}}),
+                    },
+                    None,
+                )
+    assert response["statusCode"] == 403
+    telegram_factory.return_value.send_text.assert_called_once()
+
+
 def test_webhook_rejects_missing_or_wrong_secret(monkeypatch):
     monkeypatch.setattr(lambda_handlers.config, "ENVIRONMENT", "staging")
     monkeypatch.setattr(lambda_handlers.config, "TELEGRAM_WEBHOOK_SECRET", "expected")
     event = {"headers": {}, "body": "{}"}
     assert lambda_handlers.telegram_webhook_handler(event, None)["statusCode"] == 401
-
     event["headers"] = {"X-Telegram-Bot-Api-Secret-Token": "wrong"}
     assert lambda_handlers.telegram_webhook_handler(event, None)["statusCode"] == 401
 
@@ -147,10 +241,7 @@ def test_webhook_validates_size_and_json_before_dispatch(monkeypatch):
     monkeypatch.setattr(lambda_handlers.config, "ENVIRONMENT", "staging")
     monkeypatch.setattr(lambda_handlers.config, "TELEGRAM_WEBHOOK_SECRET", "expected")
     headers = {"x-telegram-bot-api-secret-token": "expected"}
-
-    assert lambda_handlers.telegram_webhook_handler(
-        {"headers": headers, "body": "not-json"}, None
-    )["statusCode"] == 400
+    assert lambda_handlers.telegram_webhook_handler({"headers": headers, "body": "not-json"}, None)["statusCode"] == 400
     assert lambda_handlers.telegram_webhook_handler(
         {"headers": headers, "body": "x" * (lambda_handlers.MAX_WEBHOOK_BODY_BYTES + 1)}, None
     )["statusCode"] == 413
@@ -168,6 +259,5 @@ def test_webhook_dispatches_short_update_without_long_running_evaluation(monkeyp
             },
             None,
         )
-
     assert response["statusCode"] == 200
     handler.assert_called_once_with({"update_id": 1}, allow_long_running=False)

@@ -58,25 +58,90 @@ def telegram_webhook_handler(event, context):
         return {"statusCode": 400, "body": json.dumps({"error": "invalid JSON"})}
     if not isinstance(update, dict):
         return {"statusCode": 400, "body": json.dumps({"error": "invalid Telegram update"})}
+
+    message = update.get("message") or update.get("edited_message") or {}
+    text = str(message.get("text") or "").strip()
+    if text.startswith(("/recap", "/evaluasi")):
+        chat_id = str((message.get("chat") or {}).get("id") or "")
+        if not chat_id:
+            return {"statusCode": 400, "body": json.dumps({"error": "missing Telegram chat"})}
+        db = DynamoDBService()
+        stores = [s for s in db.list_stores() if str(s.telegram_chat_id) == chat_id and s.active]
+        if not stores:
+            return {"statusCode": 403, "body": json.dumps({"error": "unregistered Telegram chat"})}
+        from backend.src.services.orchestrator_service import OrchestratorService
+        from backend.src.services.telegram_service import TelegramService
+        telegram = TelegramService(db)
+        command_parts = text.split()
+        command = command_parts[0].split("@", 1)[0].lower()
+        requested_store_id = command_parts[1] if len(command_parts) > 1 else None
+        if requested_store_id:
+            stores = [store for store in stores if store.store_id == requested_store_id]
+            if not stores:
+                telegram.send_text(chat_id, "Toko tidak terhubung ke chat ini.")
+                return {"statusCode": 403, "body": json.dumps({"error": "store not authorized for chat"})}
+
+        orchestrator = OrchestratorService()
+        if command == "/recap":
+            for store in stores:
+                orchestrator.generate_and_send_daily_recap(store.store_id, trigger_source="MANUAL")
+        else:
+            telegram.send_text(
+                chat_id,
+                f"⏳ Evaluasi dimulai untuk {len(stores)} toko. Rekomendasi dikirim per toko setelah selesai.",
+            )
+            import boto3
+            client = boto3.client("lambda", region_name=config.AWS_REGION)
+            for store in stores:
+                client.invoke(
+                    FunctionName=config.ORCHESTRATOR_FUNCTION_NAME,
+                    InvocationType="Event",
+                    Payload=json.dumps({
+                        "environment": config.ENVIRONMENT,
+                        "store_id": store.store_id,
+                        "force_all": True,
+                        "send_recap": True,
+                        "trigger_source": "MANUAL",
+                    }).encode("utf-8"),
+                )
+        return {
+            "statusCode": 200,
+            "body": json.dumps({"ok": True, "command": command, "stores": [s.store_id for s in stores]}),
+        }
+
     from backend.main import handle_telegram_update
     handle_telegram_update(update, allow_long_running=False)
     return {"statusCode": 200, "body": json.dumps({"ok": True})}
 
 
 def orchestrator_handler(event, context):
-    event_environment = str((event or {}).get("environment", config.ENVIRONMENT)).lower()
+    event = event or {}
+    event_environment = str(event.get("environment", config.ENVIRONMENT)).lower()
     if event_environment != config.ENVIRONMENT:
         raise ValueError("EventBridge event environment mismatch")
     from backend.src.services.orchestrator_service import OrchestratorService
     orchestrator = OrchestratorService()
-    store_id = (event or {}).get("store_id")
+    store_id = event.get("store_id")
     if store_id:
-        return orchestrator.evaluate_store(store_id, force_all=False)
+        if event.get("action") == "recap":
+            return orchestrator.generate_and_send_daily_recap(
+                store_id, trigger_source=event.get("trigger_source", "SCHEDULED")
+            )
+        result = orchestrator.evaluate_store(store_id, force_all=bool(event.get("force_all", False)))
+        if event.get("send_recap", False):
+            result["recap"] = orchestrator.generate_and_send_daily_recap(
+                store_id, trigger_source=event.get("trigger_source", "SCHEDULED")
+            )
+        return result
     db = DynamoDBService()
     results = []
     for store in db.list_stores():
         if store.active:
-            results.append(orchestrator.evaluate_store(store.store_id, force_all=False))
+            result = orchestrator.evaluate_store(store.store_id, force_all=False)
+            result["recap"] = orchestrator.generate_and_send_daily_recap(
+                store.store_id, trigger_source=event.get("trigger_source", "SCHEDULED")
+            )
+            results.append(result)
     return {"evaluated_stores": len(results), "results": results}
 
 

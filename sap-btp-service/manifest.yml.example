@@ -1,0 +1,15 @@
+---
+applications:
+  - name: autoreplenish-sap-btp
+    random-route: false
+    memory: 256M
+    instances: 1
+    buildpacks:
+      - python_buildpack
+    command: gunicorn app:app --bind 0.0.0.0:$PORT
+    env:
+      AICORE_CLIENT_ID: "YOUR_AICORE_CLIENT_ID"
+      AICORE_CLIENT_SECRET: "YOUR_AICORE_CLIENT_SECRET"
+      AICORE_AUTH_URL: "https://your-tenant.authentication.ap10.hana.ondemand.com"
+      AICORE_API_URL: "https://api.ai.prod.ap-southeast-2.aws.ml.hana.ondemand.com"
+

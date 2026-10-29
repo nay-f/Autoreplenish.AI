@@ -47,12 +47,7 @@ def _deserialize_decimals(obj):
 class DynamoDBService:
 
     def __init__(self):
-        self.dynamodb = boto3.resource(
-            "dynamodb",
-            region_name=config.AWS_REGION,
-            aws_access_key_id=config.AWS_ACCESS_KEY_ID,
-            aws_secret_access_key=config.AWS_SECRET_ACCESS_KEY,
-        )
+        self.dynamodb = boto3.resource("dynamodb", region_name=config.AWS_REGION)
         self.table = self.dynamodb.Table(config.DYNAMODB_TABLE)
 
     # =================================================================
@@ -170,6 +165,25 @@ class DynamoDBService:
             return TelegramApprovalState(**data)
         return None
 
+    def get_approval_states_for_store(self, store_id: str) -> list[TelegramApprovalState]:
+        response = self.table.scan(
+            FilterExpression=Attr("store_id").eq(store_id) & Attr("SK").eq("STATE")
+        )
+        items = _deserialize_decimals(response.get("Items", []))
+        states = [TelegramApprovalState(**item) for item in items if item.get("PK", "").startswith("REQ#")]
+        while response.get("LastEvaluatedKey"):
+            response = self.table.scan(
+                FilterExpression=Attr("store_id").eq(store_id) & Attr("SK").eq("STATE"),
+                ExclusiveStartKey=response["LastEvaluatedKey"],
+            )
+            items = _deserialize_decimals(response.get("Items", []))
+            states.extend(
+                TelegramApprovalState(**item)
+                for item in items
+                if item.get("PK", "").startswith("REQ#")
+            )
+        return states
+
     def transition_approval_state(
         self,
         request_id: str,
@@ -178,6 +192,8 @@ class DynamoDBService:
         final_qty: int = None,
         sap_pr_id: str = None,
         rejection_reason: str = None,
+        telegram_chat_id: str = None,
+        telegram_message_id: int = None,
     ) -> bool:
         """
         Melakukan update state secara ATOMIC menggunakan Conditional Write DynamoDB.
@@ -215,6 +231,12 @@ class DynamoDBService:
         if rejection_reason is not None:
             update_expr += ", rejection_reason = :rr"
             expr_attr_values[":rr"] = rejection_reason
+        if telegram_chat_id is not None:
+            update_expr += ", telegram_chat_id = :tc"
+            expr_attr_values[":tc"] = str(telegram_chat_id)
+        if telegram_message_id is not None:
+            update_expr += ", telegram_message_id = :tm"
+            expr_attr_values[":tm"] = telegram_message_id
 
         try:
             self.table.update_item(
@@ -237,7 +259,14 @@ class DynamoDBService:
 
     # Pertahankan alias kompatibilitas
     def update_approval_state(
-        self, request_id: str, new_status: str, final_qty: int = None, sap_pr_id: str = None, rejection_reason: str = None
+        self,
+        request_id: str,
+        new_status: str,
+        final_qty: int = None,
+        sap_pr_id: str = None,
+        rejection_reason: str = None,
+        telegram_chat_id: str = None,
+        telegram_message_id: int = None,
     ):
         return self.transition_approval_state(
             request_id=request_id,
@@ -249,6 +278,8 @@ class DynamoDBService:
             final_qty=final_qty,
             sap_pr_id=sap_pr_id,
             rejection_reason=rejection_reason,
+            telegram_chat_id=telegram_chat_id,
+            telegram_message_id=telegram_message_id,
         )
 
     # =================================================================

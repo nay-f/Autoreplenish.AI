@@ -18,11 +18,18 @@ class ApprovalQueueService:
         self.client = boto3.client(
             "sqs",
             region_name=config.AWS_REGION,
-            aws_access_key_id=config.AWS_ACCESS_KEY_ID,
-            aws_secret_access_key=config.AWS_SECRET_ACCESS_KEY,
         )
 
-    def enqueue(self, request_id: str, store_id: str, sku_id: str, quantity: int, actor: str) -> dict:
+    def enqueue(
+        self,
+        request_id: str,
+        store_id: str,
+        sku_id: str,
+        quantity: int,
+        actor: str,
+        chat_id: str = "",
+        message_id: int = None,
+    ) -> dict:
         if not self.queue_url:
             raise RuntimeError("APPROVAL_QUEUE_URL belum dikonfigurasi; approval ditahan.")
         if not self.queue_url.endswith(".fifo"):
@@ -33,6 +40,8 @@ class ApprovalQueueService:
             "sku_id": sku_id,
             "quantity": quantity,
             "actor": actor,
+            "chat_id": str(chat_id or ""),
+            "message_id": message_id,
             "environment": config.ENVIRONMENT,
             "correlation_id": request_id,
             "schema_version": "1.0",

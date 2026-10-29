@@ -76,15 +76,28 @@ def _record_telegram_security_event(event_type: str, request_id: str = "", store
         logger.exception("Gagal menyimpan audit event keamanan Telegram: %s", event_type)
 
 
-def _enqueue_approved_request(state, chat_id: str, quantity: int) -> dict:
+def _enqueue_approved_request(
+    state, chat_id: str, quantity: int, message_id: int = None
+) -> dict:
     locked = db.transition_approval_state(
-        state.request_id, ["PENDING_APPROVAL", "EDIT_REQUESTED"], "APPROVED", final_qty=quantity
+        state.request_id,
+        ["PENDING_APPROVAL", "EDIT_REQUESTED"],
+        "APPROVED",
+        final_qty=quantity,
+        telegram_chat_id=chat_id,
+        telegram_message_id=message_id,
     )
     if not locked:
         raise RuntimeError(f"Request sudah diproses ({state.status}).")
     try:
         result = approval_queue.enqueue(
-            state.request_id, state.store_id, state.sku_id, quantity, chat_id
+            state.request_id,
+            state.store_id,
+            state.sku_id,
+            quantity,
+            chat_id,
+            chat_id=chat_id,
+            message_id=message_id,
         )
         db.transition_approval_state(state.request_id, ["APPROVED"], "ENQUEUED")
         return result
@@ -239,8 +252,29 @@ def check_integrations_health(current_user: dict = Depends(get_current_user)):
     # 3. Cek Telegram Bot API
     status_report["telegram"] = tg_svc.verify_bot()
 
-    # 4. Cek SAP BTP OAuth2 (Tanpa token_prefix)
-    if not config.SAP_TOKEN_URL or not config.SAP_CLIENT_ID or not config.SAP_CLIENT_SECRET:
+    # 4. Cek SAP BTP / S/4HANA OData & AI Core
+    stores = db.list_stores()
+    active_btp_store = next((s for s in stores if s.ingestion_mode == "SAP_BTP" and s.sap_odata_url), None)
+    if active_btp_store:
+        try:
+            r = requests.get(active_btp_store.sap_odata_url, timeout=3)
+            if r.status_code in (200, 401, 403, 405):
+                status_report["sap"] = {
+                    "status": "CONNECTED",
+                    "detail": "SAP BTP S/4HANA OData Aktif",
+                    "url": active_btp_store.sap_odata_url,
+                }
+            else:
+                status_report["sap"] = {
+                    "status": "ERROR",
+                    "detail": f"HTTP {r.status_code}",
+                }
+        except Exception:
+            status_report["sap"] = {
+                "status": "ERROR",
+                "detail": "Gagal terhubung ke SAP BTP OData Hub",
+            }
+    elif not config.SAP_TOKEN_URL or not config.SAP_CLIENT_ID or not config.SAP_CLIENT_SECRET:
         status_report["sap"] = {
             "status": "NOT_CONFIGURED",
             "detail": "Kredensial SAP BTP belum diisi",
@@ -409,8 +443,9 @@ def get_governance_and_accuracy_metrics(
 
     # Metrik Transaksi SAP PR
     total_prs = len(pr_logs)
-    sap_success = sum(1 for p in pr_logs if p.get("status") == "SAP_SUBMITTED")
+    sap_success = sum(1 for p in pr_logs if p.get("status") in ("SAP_SUBMITTED", "BTP_VERIFIED_SANDBOX_PR"))
     sandbox_success = sum(1 for p in pr_logs if p.get("status") == "BTP_VERIFIED_SANDBOX_PR")
+    prod_success = sum(1 for p in pr_logs if p.get("status") == "SAP_SUBMITTED")
     sap_failed = total_prs - sap_success
 
     return {
@@ -442,6 +477,7 @@ def get_governance_and_accuracy_metrics(
             "sap_pr_total": total_prs,
             "sap_pr_success_total": sap_success,
             "sap_sandbox_verified_total": sandbox_success,
+            "sap_production_submitted_total": prod_success,
             "sap_pr_failure_total": sap_failed,
             "sap_success_rate_pct": round((sap_success / total_prs) * 100, 1) if total_prs else 0.0,
         },
@@ -540,7 +576,9 @@ def handle_telegram_update(update: dict, allow_long_running: bool = True):
 
             if action == "APPROVE":
                 try:
-                    _enqueue_approved_request(state, chat_id, state.recommended_qty)
+                    _enqueue_approved_request(
+                        state, chat_id, state.recommended_qty, message_id=message_id
+                    )
                 except Exception as exc:
                     logger.error("Approval queue gagal untuk %s: %s", req_id, exc)
                     tg_svc.answer_callback(cb_id, "Approval ditahan karena queue SAP belum tersedia.")
@@ -550,11 +588,11 @@ def handle_telegram_update(update: dict, allow_long_running: bool = True):
                     tg_svc.update_message_status(
                         chat_id,
                         message_id,
-                        "✅ *PESANAN DISETUJUI*\n"
+                        "✅ <b>PESANAN DISETUJUI</b>\n"
                         "━━━━━━━━━━━━━━━━━━━━━━\n"
-                        f"🏷️ *SKU:* {state.sku_name or state.sku_id}\n"
-                        f"📦 *Kuota:* `{state.recommended_qty} Pcs`\n"
-                        "📬 *Status:* Menunggu worker SAP (SQS)",
+                        f"🏷️ <b>Barang:</b> {state.sku_name or state.sku_id}\n"
+                        f"📦 <b>Jumlah:</b> <code>{state.recommended_qty} Pcs</code>\n"
+                        "📬 <b>Status:</b> Menunggu worker SAP (SQS)",
                     )
 
             elif action == "REJECT":
@@ -569,9 +607,9 @@ def handle_telegram_update(update: dict, allow_long_running: bool = True):
                     tg_svc.update_message_status(
                         chat_id,
                         message_id,
-                        f"❌ *PESANAN DITOLAK*\n"
+                        f"❌ <b>PESANAN DITOLAK</b>\n"
                         f"━━━━━━━━━━━━━━━━━━━━━━\n"
-                        f"🏷️ *SKU:* {state.sku_name or state.sku_id}\n"
+                        f"🏷️ <b>Barang:</b> {state.sku_name or state.sku_id}\n"
                         f"Tidak ada Purchase Requisition yang diterbitkan.",
                     )
 
@@ -774,7 +812,12 @@ def handle_telegram_update(update: dict, allow_long_running: bool = True):
                 req_id = session["req_id"]
                 state = db.get_approval_state(req_id)
                 if state and state.status == "EDIT_REQUESTED":
-                    _enqueue_approved_request(state, chat_id, new_qty)
+                    _enqueue_approved_request(
+                        state,
+                        chat_id,
+                        new_qty,
+                        message_id=session.get("message_id"),
+                    )
                     _send_tg_text(
                         chat_id,
                         f"✅ *KUOTA DIREVISI & DISETUJUI*\n"

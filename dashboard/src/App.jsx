@@ -51,9 +51,9 @@ export default function App() {
     return saved && token ? JSON.parse(saved) : null;
   });
   const [loginForm, setLoginForm] = useState({
-    username: "admin",
+    username: "masukan-username",
     password: "",
-    role: "Store Manager",
+    role: "IT Administrator",
   });
   const [authError, setAuthError] = useState("");
 
@@ -142,7 +142,7 @@ export default function App() {
         return;
       }
       notify(
-        `Gagal memuat data dari backend (${err.message}). Pastikan uvicorn aktif di port 8000.`,
+        `Gagal memuat data dari backend (${err.message}). Periksa koneksi API Gateway.`,
         "error"
       );
     } finally {
@@ -184,9 +184,8 @@ export default function App() {
       localStorage.setItem("ar_user", JSON.stringify(res.user));
       setUser(res.user);
     } catch (err) {
-      setAuthError(
-        err.response?.data?.detail || "Login gagal. Periksa kredensial Anda."
-      );
+      const msg = err.response?.data?.detail || err.message || "Login gagal. Periksa kredensial Anda.";
+      setAuthError(msg);
     } finally {
       setSaving(false);
     }
@@ -281,21 +280,21 @@ export default function App() {
     const st = serviceObj?.status || "NOT_CONFIGURED";
     if (st === "CONNECTED") {
       return (
-        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-          <CheckCircle2 className="w-3.5 h-3.5" /> CONNECTED
+        <span className="inline-flex shrink-0 items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 whitespace-nowrap">
+          <CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> CONNECTED
         </span>
       );
     }
     if (st === "NOT_CONFIGURED") {
       return (
-        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-500/10 text-amber-400 border border-amber-500/20">
-          <AlertTriangle className="w-3.5 h-3.5" /> NOT CONFIGURED
+        <span className="inline-flex shrink-0 items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-amber-500/10 text-amber-400 border border-amber-500/20 whitespace-nowrap">
+          <AlertTriangle className="w-3.5 h-3.5 shrink-0" /> NOT CONFIGURED
         </span>
       );
     }
     return (
-      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-rose-500/10 text-rose-400 border border-rose-500/20">
-        <XCircle className="w-3.5 h-3.5" /> {st}
+      <span className="inline-flex shrink-0 items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-rose-500/10 text-rose-400 border border-rose-500/20 whitespace-nowrap">
+        <XCircle className="w-3.5 h-3.5 shrink-0" /> {st}
       </span>
     );
   };
@@ -331,15 +330,15 @@ export default function App() {
   // ===================================================================
   if (!user) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-950 p-4">
-        <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl p-8 shadow-2xl">
+      <div className="min-h-screen flex items-center justify-center bg-[#161615] p-4">
+        <div className="w-full max-w-md bg-[#1F1E1D] border border-[#3D3C39] rounded-2xl p-8 shadow-2xl">
           <div className="flex items-center gap-3 mb-6">
-            <div className="p-3 rounded-xl bg-indigo-600/20 border border-indigo-500/30 text-indigo-400">
+            <div className="p-3 rounded-xl bg-[#D97757]/15 border border-[#D97757]/40 text-[#D97757]">
               <ShieldCheck className="w-7 h-7" />
             </div>
             <div>
               <h1 className="text-xl font-bold text-white">AutoReplenish.ai</h1>
-              <p className="text-xs text-slate-400">
+              <p className="text-xs text-[#A3A199]">
                 Enterprise Retail Replenishment Middleware
               </p>
             </div>
@@ -353,7 +352,7 @@ export default function App() {
 
           <form onSubmit={handleLogin} className="space-y-4">
             <div>
-              <label className="block text-xs text-slate-400 mb-1">Username</label>
+              <label className="block text-xs text-[#A3A199] mb-1">Username</label>
               <input
                 type="text"
                 required
@@ -361,11 +360,11 @@ export default function App() {
                 onChange={(e) =>
                   setLoginForm({ ...loginForm, username: e.target.value })
                 }
-                className="w-full px-3.5 py-2.5 rounded-lg bg-slate-950 border border-slate-800 text-sm focus:border-indigo-500 focus:outline-none"
+                className="w-full px-3.5 py-2.5 rounded-lg bg-[#161615] border border-[#3D3C39] text-sm focus:border-[#D97757] focus:outline-none"
               />
             </div>
             <div>
-              <label className="block text-xs text-slate-400 mb-1">Password</label>
+              <label className="block text-xs text-[#A3A199] mb-1">Password</label>
               <input
                 type="password"
                 required
@@ -374,11 +373,11 @@ export default function App() {
                 onChange={(e) =>
                   setLoginForm({ ...loginForm, password: e.target.value })
                 }
-                className="w-full px-3.5 py-2.5 rounded-lg bg-slate-950 border border-slate-800 text-sm focus:border-indigo-500 focus:outline-none"
+                className="w-full px-3.5 py-2.5 rounded-lg bg-[#161615] border border-[#3D3C39] text-sm focus:border-[#D97757] focus:outline-none"
               />
             </div>
             <div>
-              <label className="block text-xs text-slate-400 mb-1">
+              <label className="block text-xs text-[#A3A199] mb-1">
                 Peran Operasional (RBAC Role)
               </label>
               <select
@@ -386,7 +385,7 @@ export default function App() {
                 onChange={(e) =>
                   setLoginForm({ ...loginForm, role: e.target.value })
                 }
-                className="w-full px-3.5 py-2.5 rounded-lg bg-slate-950 border border-slate-800 text-sm focus:border-indigo-500 focus:outline-none"
+                className="w-full px-3.5 py-2.5 rounded-lg bg-[#161615] border border-[#3D3C39] text-sm focus:border-[#D97757] focus:outline-none"
               >
                 <option value="Store Manager">Store Manager (Kepala Toko)</option>
                 <option value="Regional Manager">Regional Manager</option>
@@ -397,7 +396,7 @@ export default function App() {
             <button
               type="submit"
               disabled={saving}
-              className="w-full py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-semibold text-sm transition"
+              className="w-full py-2.5 rounded-lg bg-[#D97757] hover:bg-[#E58A6B] disabled:opacity-50 text-white font-semibold text-sm transition"
             >
               {saving ? "Memverifikasi JWT..." : "Masuk ke Dashboard"}
             </button>
@@ -411,29 +410,29 @@ export default function App() {
   // TAMPILAN 2: DASHBOARD UTAMA
   // ===================================================================
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100">
+    <div className="min-h-screen bg-[#161615] text-[#FAF9F5]">
       {/* Top Navbar */}
-      <header className="border-b border-slate-800 bg-slate-900/70 backdrop-blur sticky top-0 z-30">
-        <div className="max-w-7xl mx-auto px-6 py-4 flex flex-wrap items-center justify-between gap-4">
+      <header className="border-b border-[#3D3C39] bg-[#1F1E1D]/70 backdrop-blur sticky top-0 z-30">
+        <div className="w-full max-w-[1780px] mx-auto px-6 lg:px-10 py-4 flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-indigo-600 text-white">
+            <div className="p-2 rounded-lg bg-[#D97757] text-white">
               <Zap className="w-5 h-5" />
             </div>
             <div>
               <h1 className="font-bold text-lg tracking-tight">AutoReplenish.ai</h1>
-              <p className="text-xs text-slate-400">
+              <p className="text-xs text-[#A3A199]">
                 Production Middleware ({metrics?.version_info?.prompt_version || "v2.0"})
               </p>
             </div>
           </div>
 
           {/* Menu Navigasi Utama */}
-          <div className="flex items-center gap-2 bg-slate-950 p-1 rounded-xl border border-slate-800">
+          <div className="flex items-center gap-2 bg-[#161615] p-1 rounded-xl border border-[#3D3C39]">
             <button
               onClick={() => setMainView("overview")}
               className={`px-3.5 py-1.5 rounded-lg text-xs font-medium transition ${mainView === "overview"
-                  ? "bg-indigo-600 text-white"
-                  : "text-slate-400 hover:text-white"
+                ? "bg-[#D97757] text-white"
+                : "text-[#A3A199] hover:text-white"
                 }`}
             >
               Monitor &amp; Governance
@@ -441,8 +440,8 @@ export default function App() {
             <button
               onClick={() => setMainView("settings")}
               className={`px-3.5 py-1.5 rounded-lg text-xs font-medium transition ${mainView === "settings"
-                  ? "bg-indigo-600 text-white"
-                  : "text-slate-400 hover:text-white"
+                ? "bg-[#D97757] text-white"
+                : "text-[#A3A199] hover:text-white"
                 }`}
             >
               Pengaturan Toko (5 Tab)
@@ -450,8 +449,8 @@ export default function App() {
             <button
               onClick={() => setMainView("audit")}
               className={`px-3.5 py-1.5 rounded-lg text-xs font-medium transition ${mainView === "audit"
-                  ? "bg-indigo-600 text-white"
-                  : "text-slate-400 hover:text-white"
+                ? "bg-[#D97757] text-white"
+                : "text-[#A3A199] hover:text-white"
                 }`}
             >
               Audit AI &amp; PR SAP ({auditLogs.length})
@@ -462,18 +461,20 @@ export default function App() {
           <div className="flex items-center gap-3">
             <button
               onClick={loadDashboardData}
-              className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300"
+              className="p-2 rounded-lg bg-[#2A2927] hover:bg-[#3A3937] text-[#FAF9F5]"
+              aria-label="Muat ulang data live"
               title="Muat Ulang Data Live"
             >
               <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
             </button>
             <div className="text-right hidden sm:block">
               <div className="text-xs font-semibold text-white">{user.username}</div>
-              <div className="text-[11px] text-indigo-400">{user.role}</div>
+              <div className="text-[11px] text-[#D97757]">{user.role}</div>
             </div>
             <button
               onClick={handleLogout}
               className="p-2 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20"
+              aria-label="Keluar dari dashboard"
               title="Keluar"
             >
               <LogOut className="w-4 h-4" />
@@ -482,13 +483,15 @@ export default function App() {
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-6 py-6 space-y-6">
+      <main className="w-full max-w-[1780px] mx-auto px-6 lg:px-10 py-6 space-y-6">
         {/* Notifikasi Banner */}
         {bannerMsg && (
           <div
+            aria-live="polite"
+            role="status"
             className={`p-4 rounded-xl border text-sm flex items-center justify-between ${bannerMsg.type === "error"
-                ? "bg-rose-500/10 border-rose-500/30 text-rose-300"
-                : "bg-emerald-500/10 border-emerald-500/30 text-emerald-300"
+              ? "bg-rose-500/10 border-rose-500/30 text-rose-300"
+              : "bg-emerald-500/10 border-emerald-500/30 text-emerald-300"
               }`}
           >
             <span>{bannerMsg.text}</span>
@@ -500,64 +503,74 @@ export default function App() {
 
         {/* Bar Indikator Koneksi API Riil */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-between">
-            <div>
-              <div className="text-xs text-slate-400">AWS Bedrock AI</div>
-              <div className="text-sm font-semibold mt-0.5 truncate max-w-[160px]">
+          <div className="p-4 rounded-xl bg-[#1F1E1D] border border-[#3D3C39] flex items-center justify-between gap-3 overflow-hidden">
+            <div className="min-w-0 flex-1 overflow-hidden">
+              <div className="text-xs text-[#A3A199] truncate">AWS Bedrock AI</div>
+              <div className="text-sm font-semibold mt-0.5 truncate text-[#FAF9F5]" title={health?.bedrock?.model || "Claude Sonnet"}>
                 {health?.bedrock?.model || "Claude Sonnet"}
               </div>
             </div>
-            {renderStatusBadge(health?.bedrock)}
-          </div>
-
-          <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-between">
-            <div>
-              <div className="text-xs text-slate-400">OpenWeatherMap</div>
-              <div className="text-sm font-semibold mt-0.5">Satelit Cuaca GPS</div>
+            <div className="shrink-0">
+              {renderStatusBadge(health?.bedrock)}
             </div>
-            {renderStatusBadge(health?.weather)}
           </div>
 
-          <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-between">
-            <div>
-              <div className="text-xs text-slate-400">Telegram Bot HITL</div>
-              <div className="text-sm font-semibold mt-0.5">
-                {health?.telegram?.username || "Bot Kanal Toko"}
+          <div className="p-4 rounded-xl bg-[#1F1E1D] border border-[#3D3C39] flex items-center justify-between gap-3 overflow-hidden">
+            <div className="min-w-0 flex-1 overflow-hidden">
+              <div className="text-xs text-[#A3A199] truncate">OpenWeatherMap</div>
+              <div className="text-sm font-semibold mt-0.5 truncate text-[#FAF9F5]">Satelit Cuaca GPS</div>
+            </div>
+            <div className="shrink-0">
+              {renderStatusBadge(health?.weather)}
+            </div>
+          </div>
+
+          <div className="p-4 rounded-xl bg-[#1F1E1D] border border-[#3D3C39] flex items-center justify-between gap-3 overflow-hidden">
+            <div className="min-w-0 flex-1 overflow-hidden">
+              <div className="text-xs text-[#A3A199] truncate">Telegram Bot HITL</div>
+              <div className="text-sm font-semibold mt-0.5 truncate text-[#FAF9F5]" title={health?.telegram?.username || "@autoreplenish_ai_bot"}>
+                {health?.telegram?.username || "@autoreplenish_ai_bot"}
               </div>
             </div>
-            {renderStatusBadge(health?.telegram)}
+            <div className="shrink-0">
+              {renderStatusBadge(health?.telegram)}
+            </div>
           </div>
 
-          <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-between">
-            <div>
-              <div className="text-xs text-slate-400">SAP BTP / S/4HANA</div>
-              <div className="text-sm font-semibold mt-0.5">OAuth2 &amp; PR OData</div>
+          <div className="p-4 rounded-xl bg-[#1F1E1D] border border-[#3D3C39] flex items-center justify-between gap-3 overflow-hidden">
+            <div className="min-w-0 flex-1 overflow-hidden">
+              <div className="text-xs text-[#A3A199] truncate">SAP BTP / S/4HANA</div>
+              <div className="text-sm font-semibold mt-0.5 truncate text-[#FAF9F5]" title={health?.sap?.detail || "S/4HANA OData & AI Core"}>
+                {health?.sap?.detail || "S/4HANA OData & AI Core"}
+              </div>
             </div>
-            {renderStatusBadge(health?.sap)}
+            <div className="shrink-0">
+              {renderStatusBadge(health?.sap)}
+            </div>
           </div>
         </div>
 
         {/* Kartu Metrik Observability & AI Governance Aktual (Fase 3 & 4) */}
         {metrics && (
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800">
-              <div className="text-[11px] text-slate-400 flex items-center gap-1">
-                <BarChart3 className="w-3.5 h-3.5 text-indigo-400" />
+            <div className="p-4 rounded-xl bg-[#1F1E1D]/60 border border-[#3D3C39]">
+              <div className="text-[11px] text-[#A3A199] flex items-center gap-1">
+                <BarChart3 className="w-3.5 h-3.5 text-[#D97757]" />
                 HITL Acceptance / Edit Rate
               </div>
               <div className="text-lg font-bold text-white mt-1">
                 {metrics.hitl_decision_metrics?.acceptance_rate_pct ?? 0}%{" "}
-                <span className="text-xs font-normal text-slate-400">
+                <span className="text-xs font-normal text-[#A3A199]">
                   (Edit: {metrics.hitl_decision_metrics?.edit_rate_pct ?? 0}%)
                 </span>
               </div>
-              <div className="text-[11px] text-slate-500">
+              <div className="text-[11px] text-[#A3A199]">
                 Total Keputusan: {metrics.hitl_decision_metrics?.decided_total ?? 0}
               </div>
             </div>
 
-            <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800">
-              <div className="text-[11px] text-slate-400">
+            <div className="p-4 rounded-xl bg-[#1F1E1D]/60 border border-[#3D3C39]">
+              <div className="text-[11px] text-[#A3A199]">
                 Akurasi Keselarasan Manajer (100 - WAPE)
               </div>
               <div className="text-lg font-bold text-emerald-400 mt-1">
@@ -565,33 +578,33 @@ export default function App() {
                   ? `${metrics.hitl_decision_metrics?.manager_alignment_accuracy_pct}%`
                   : "Menunggu Approval"}
               </div>
-              <div className="text-[11px] text-slate-500">
+              <div className="text-[11px] text-[#A3A199]">
                 Deviasi WAPE: {metrics.hitl_decision_metrics?.manager_alignment_wape_pct ?? 0}%
               </div>
             </div>
 
-            <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800">
-              <div className="text-[11px] text-slate-400">
+            <div className="p-4 rounded-xl bg-[#1F1E1D]/60 border border-[#3D3C39]">
+              <div className="text-[11px] text-[#A3A199]">
                 Rata-Rata Latensi &amp; Fallback Bedrock
               </div>
               <div className="text-lg font-bold text-white mt-1">
                 {metrics.evaluation_metrics?.average_bedrock_latency_ms ?? 0} ms
               </div>
-              <div className="text-[11px] text-slate-500">
+              <div className="text-[11px] text-[#A3A199]">
                 Fallback Rate: {metrics.evaluation_metrics?.bedrock_fallback_rate_pct ?? 0}% | Guardrail:{" "}
                 {metrics.evaluation_metrics?.guardrail_interventions_total ?? 0}x
               </div>
             </div>
 
-            <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800">
-              <div className="text-[11px] text-slate-400">
+            <div className="p-4 rounded-xl bg-[#1F1E1D]/60 border border-[#3D3C39]">
+              <div className="text-[11px] text-[#A3A199]">
                 Keberhasilan Dokumen PR SAP
               </div>
-              <div className="text-lg font-bold text-indigo-400 mt-1">
+              <div className="text-lg font-bold text-[#D97757] mt-1">
                 {metrics.sap_transaction_metrics?.sap_pr_success_total ?? 0} /{" "}
                 {metrics.sap_transaction_metrics?.sap_pr_total ?? 0} PR
               </div>
-              <div className="text-[11px] text-slate-500">
+              <div className="text-[11px] text-[#A3A199]">
                 Success Rate: {metrics.sap_transaction_metrics?.sap_success_rate_pct ?? 0}%
               </div>
             </div>
@@ -599,17 +612,17 @@ export default function App() {
         )}
 
         {/* Pemilih Toko Aktif */}
-        <div className="p-4 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-wrap items-center justify-between gap-4">
+        <div className="p-4 rounded-xl bg-[#1F1E1D]/90 border border-[#3D3C39] flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <Store className="w-5 h-5 text-indigo-400" />
+            <Store className="w-5 h-5 text-[#D97757]" />
             <div>
-              <label className="block text-xs text-slate-400">
+              <label className="block text-xs text-[#A3A199]">
                 Pilih Gerai Toko Aktif (Sinkron dengan Bot Telegram <code>/tambah_toko</code>):
               </label>
               <select
                 value={selectedStoreId}
                 onChange={(e) => handleSelectStore(e.target.value)}
-                className="mt-1 bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-white focus:border-indigo-500 focus:outline-none"
+                className="mt-1 bg-[#161615] border border-[#3D3C39] rounded-lg px-3 py-1.5 text-sm text-white focus:border-[#D97757] focus:outline-none"
               >
                 {stores.length === 0 && (
                   <option value="">-- Belum ada toko terdaftar --</option>
@@ -633,7 +646,7 @@ export default function App() {
                 setMainView("settings");
                 setActiveSettingsTab(1);
               }}
-              className="px-3.5 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-medium flex items-center gap-1.5"
+              className="px-3.5 py-2 rounded-lg bg-[#2A2927] hover:bg-[#3A3937] text-xs font-medium flex items-center gap-1.5"
             >
               <Plus className="w-4 h-4" /> Buat Toko Baru
             </button>
@@ -642,7 +655,7 @@ export default function App() {
               <button
                 onClick={() => handleTriggerEvaluation(selectedStoreId)}
                 disabled={evaluating}
-                className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-xs font-semibold text-white flex items-center gap-2 shadow-lg shadow-indigo-600/20"
+                className="px-4 py-2 rounded-lg bg-[#D97757] hover:bg-[#E58A6B] disabled:opacity-50 text-xs font-semibold text-white flex items-center gap-2 "
               >
                 <Zap className="w-4 h-4" />
                 {evaluating
@@ -659,23 +672,23 @@ export default function App() {
         {mainView === "overview" && (
           <div className="space-y-6">
             {stores.length === 0 ? (
-              <div className="p-12 text-center rounded-2xl bg-slate-900 border border-slate-800">
-                <p className="text-slate-300 font-medium">
+              <div className="p-12 text-center rounded-2xl bg-[#1F1E1D] border border-[#3D3C39]">
+                <p className="text-[#FAF9F5] font-medium">
                   Belum ada data toko di DynamoDB.
                 </p>
-                <p className="text-xs text-slate-500 mt-1">
+                <p className="text-xs text-[#A3A199] mt-1">
                   Klik tombol &ldquo;Buat Toko Baru&rdquo; di atas atau ketik{" "}
                   <code>/tambah_toko</code> di Bot Telegram Anda.
                 </p>
               </div>
             ) : (
-              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
+              <div className="bg-[#1F1E1D] border border-[#3D3C39] rounded-2xl p-6">
                 <div className="flex items-center justify-between mb-4">
                   <div>
                     <h2 className="text-base font-bold text-white">
                       Status Posisi Stok &amp; Aturan SKU — {storeForm.store_name}
                     </h2>
-                    <p className="text-xs text-slate-400">
+                    <p className="text-xs text-[#A3A199]">
                       Koordinat GPS: {storeForm.latitude}, {storeForm.longitude} | Zona:{" "}
                       {storeForm.zone} | Mode: {storeForm.ingestion_mode}
                     </p>
@@ -685,21 +698,21 @@ export default function App() {
                       setMainView("settings");
                       setActiveSettingsTab(4);
                     }}
-                    className="text-xs text-indigo-400 hover:underline"
+                    className="text-xs text-[#D97757] hover:underline"
                   >
                     + Kelola Aturan SKU
                   </button>
                 </div>
 
                 {skus.length === 0 ? (
-                  <p className="text-xs text-slate-400 py-6 text-center">
+                  <p className="text-xs text-[#A3A199] py-6 text-center">
                     Belum ada SKU untuk toko ini. Tambahkan SKU di tab Pengaturan Toko.
                   </p>
                 ) : (
                   <div className="overflow-x-auto">
                     <table className="w-full text-left border-collapse text-sm">
                       <thead>
-                        <tr className="border-b border-slate-800 text-xs text-slate-400">
+                        <tr className="border-b border-[#3D3C39] text-xs text-[#A3A199]">
                           <th className="py-3 px-3">ID &amp; Nama Barang</th>
                           <th className="py-3 px-3">Kategori</th>
                           <th className="py-3 px-3">Harga Satuan</th>
@@ -710,14 +723,14 @@ export default function App() {
                           <th className="py-3 px-3">Status Rak</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-slate-800/60">
+                      <tbody className="divide-y divide-[#3D3C39]">
                         {skus.map((item) => {
                           const isLow = item.physical_stock <= item.threshold;
                           return (
-                            <tr key={item.sku_id} className="hover:bg-slate-800/30">
+                            <tr key={item.sku_id} className="hover:bg-[#2A2927]/30">
                               <td className="py-3 px-3 font-medium">
                                 <div>{item.sku_name}</div>
-                                <div className="text-xs text-slate-500">{item.sku_id}</div>
+                                <div className="text-xs text-[#A3A199]">{item.sku_id}</div>
                               </td>
                               <td className="py-3 px-3 text-xs">
                                 {item.category}{" "}
@@ -737,7 +750,7 @@ export default function App() {
                               <td className="py-3 px-3">
                                 {item.average_daily_burn_rate} Pcs/h
                               </td>
-                              <td className="py-3 px-3 text-xs text-slate-300">
+                              <td className="py-3 px-3 text-xs text-[#FAF9F5]">
                                 MOQ {item.moq} | Kelipatan {item.packaging_multiple}
                               </td>
                               <td className="py-3 px-3">
@@ -767,8 +780,8 @@ export default function App() {
             VIEW 2: 5 TAB PENGATURAN OPERASIONAL TOKO
         =============================================================== */}
         {mainView === "settings" && (
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
-            <div className="flex overflow-x-auto border-b border-slate-800 bg-slate-950/60">
+          <div className="bg-[#1F1E1D] border border-[#3D3C39] rounded-2xl overflow-hidden">
+            <div className="flex overflow-x-auto border-b border-[#3D3C39] bg-[#161615]/60">
               {[
                 { id: 1, label: "1. Profil & Geolokasi", icon: MapPin },
                 { id: 2, label: "2. Sumber Data Inventaris", icon: Database },
@@ -790,8 +803,8 @@ export default function App() {
                     type="button"
                     onClick={() => setActiveSettingsTab(tab.id)}
                     className={`flex items-center gap-2 px-5 py-4 text-xs font-semibold whitespace-nowrap border-b-2 transition ${active
-                        ? "border-indigo-500 text-indigo-400 bg-indigo-500/5"
-                        : "border-transparent text-slate-400 hover:text-slate-200"
+                      ? "border-[#D97757] text-[#FAF9F5] bg-[#3A3937]"
+                      : "border-transparent text-[#A3A199] hover:text-[#FAF9F5]"
                       }`}
                   >
                     <Icon className="w-4 h-4" />
@@ -807,7 +820,7 @@ export default function App() {
                 <form onSubmit={handleSaveStoreSettings} className="space-y-4 max-w-3xl">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-xs text-slate-400 mb-1">
+                      <label className="block text-xs text-[#A3A199] mb-1">
                         ID Toko (Hanya Huruf, Angka, Strip)
                       </label>
                       <input
@@ -817,11 +830,11 @@ export default function App() {
                         onChange={(e) =>
                           setStoreForm({ ...storeForm, store_id: e.target.value })
                         }
-                        className="w-full px-3.5 py-2 rounded-lg bg-slate-950 border border-slate-800 text-sm"
+                        className="w-full px-3.5 py-2 rounded-lg bg-[#161615] border border-[#3D3C39] text-sm"
                       />
                     </div>
                     <div>
-                      <label className="block text-xs text-slate-400 mb-1">
+                      <label className="block text-xs text-[#A3A199] mb-1">
                         Nama Gerai / Toko
                       </label>
                       <input
@@ -832,11 +845,11 @@ export default function App() {
                         onChange={(e) =>
                           setStoreForm({ ...storeForm, store_name: e.target.value })
                         }
-                        className="w-full px-3.5 py-2 rounded-lg bg-slate-950 border border-slate-800 text-sm"
+                        className="w-full px-3.5 py-2 rounded-lg bg-[#161615] border border-[#3D3C39] text-sm"
                       />
                     </div>
                     <div>
-                      <label className="block text-xs text-slate-400 mb-1">
+                      <label className="block text-xs text-[#A3A199] mb-1">
                         Tipe Wilayah (Area Type)
                       </label>
                       <select
@@ -844,7 +857,7 @@ export default function App() {
                         onChange={(e) =>
                           setStoreForm({ ...storeForm, area_type: e.target.value })
                         }
-                        className="w-full px-3.5 py-2 rounded-lg bg-slate-950 border border-slate-800 text-sm"
+                        className="w-full px-3.5 py-2 rounded-lg bg-[#161615] border border-[#3D3C39] text-sm"
                       >
                         <option value="Komersial / Perkantoran">
                           Komersial / Perkantoran
@@ -856,7 +869,7 @@ export default function App() {
                       </select>
                     </div>
                     <div>
-                      <label className="block text-xs text-slate-400 mb-1">
+                      <label className="block text-xs text-[#A3A199] mb-1">
                         Zona Logistik DC (Delivery Zone)
                       </label>
                       <input
@@ -866,11 +879,11 @@ export default function App() {
                         onChange={(e) =>
                           setStoreForm({ ...storeForm, zone: e.target.value })
                         }
-                        className="w-full px-3.5 py-2 rounded-lg bg-slate-950 border border-slate-800 text-sm"
+                        className="w-full px-3.5 py-2 rounded-lg bg-[#161615] border border-[#3D3C39] text-sm"
                       />
                     </div>
                     <div>
-                      <label className="block text-xs text-slate-400 mb-1">
+                      <label className="block text-xs text-[#A3A199] mb-1">
                         Latitude GPS (-90 s/d 90)
                       </label>
                       <input
@@ -886,11 +899,11 @@ export default function App() {
                             latitude: parseFloat(e.target.value || 0),
                           })
                         }
-                        className="w-full px-3.5 py-2 rounded-lg bg-slate-950 border border-slate-800 text-sm"
+                        className="w-full px-3.5 py-2 rounded-lg bg-[#161615] border border-[#3D3C39] text-sm"
                       />
                     </div>
                     <div>
-                      <label className="block text-xs text-slate-400 mb-1">
+                      <label className="block text-xs text-[#A3A199] mb-1">
                         Longitude GPS (-180 s/d 180)
                       </label>
                       <input
@@ -906,14 +919,14 @@ export default function App() {
                             longitude: parseFloat(e.target.value || 0),
                           })
                         }
-                        className="w-full px-3.5 py-2 rounded-lg bg-slate-950 border border-slate-800 text-sm"
+                        className="w-full px-3.5 py-2 rounded-lg bg-[#161615] border border-[#3D3C39] text-sm"
                       />
                     </div>
                   </div>
                   <button
                     type="submit"
                     disabled={saving}
-                    className="px-5 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-xs font-semibold text-white"
+                    className="px-5 py-2.5 rounded-lg bg-[#D97757] hover:bg-[#E58A6B] disabled:opacity-50 text-xs font-semibold text-white"
                   >
                     {saving ? "Menyimpan..." : "Simpan Profil & Geolokasi"}
                   </button>
@@ -933,14 +946,14 @@ export default function App() {
                         }))
                       }
                       className={`cursor-pointer p-5 rounded-xl border transition ${storeForm?.ingestion_mode !== "SAP_BTP"
-                          ? "border-indigo-500 bg-indigo-500/10"
-                          : "border-slate-800 bg-slate-950 hover:border-slate-700"
+                        ? "border-[#D97757] bg-[#2A2927]"
+                        : "border-[#3D3C39] bg-[#161615] hover:border-[#3D3C39]"
                         }`}
                     >
                       <div className="font-bold text-sm text-white">
                         Mode A: Ritel Kecil / Toserba
                       </div>
-                      <p className="text-xs text-slate-400 mt-1">
+                      <p className="text-xs text-[#A3A199] mt-1">
                         Integrasi menggunakan POS Kasir Lokal via webhook atau sinkronisasi harian.
                       </p>
                     </div>
@@ -954,27 +967,27 @@ export default function App() {
                         }))
                       }
                       className={`cursor-pointer p-5 rounded-xl border transition ${storeForm?.ingestion_mode === "SAP_BTP"
-                          ? "border-indigo-500 bg-indigo-500/10"
-                          : "border-slate-800 bg-slate-950 hover:border-slate-700"
+                        ? "border-[#D97757] bg-[#2A2927]"
+                        : "border-[#3D3C39] bg-[#161615] hover:border-[#3D3C39]"
                         }`}
                     >
                       <div className="font-bold text-sm text-white">
                         Mode B: Ritel Korporat / Berjejaring
                       </div>
-                      <p className="text-xs text-slate-400 mt-1">
+                      <p className="text-xs text-[#A3A199] mt-1">
                         Integrasi enterprise dengan SAP S/4HANA OData &amp; SAP BTP untuk penerbitan Purchase Requisition.
                       </p>
                     </div>
                   </div>
 
                   {storeForm?.ingestion_mode !== "SAP_BTP" ? (
-                    <div className="p-5 rounded-xl bg-slate-950 border border-slate-800 space-y-4">
+                    <div className="p-5 rounded-xl bg-[#161615] border border-[#3D3C39] space-y-4">
                       <div className="text-xs font-bold text-amber-400 uppercase tracking-wider">
                         ⚡ Konfigurasi Webhook Kasir POS Lokal
                       </div>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div>
-                          <label className="block text-xs text-slate-400 mb-1">
+                          <label className="block text-xs text-[#A3A199] mb-1">
                             Tipe Konektor POS
                           </label>
                           <select
@@ -988,7 +1001,7 @@ export default function App() {
                                 pos_connector_type: e.target.value,
                               })
                             }
-                            className="w-full px-3.5 py-2 rounded-lg bg-slate-900 border border-slate-800 text-sm"
+                            className="w-full px-3.5 py-2 rounded-lg bg-[#1F1E1D] border border-[#3D3C39] text-sm"
                           >
                             <option value="REST Webhook (Real-time Event)">
                               REST Webhook (Real-time Event)
@@ -1000,7 +1013,7 @@ export default function App() {
                           </select>
                         </div>
                         <div>
-                          <label className="block text-xs text-slate-400 mb-1">
+                          <label className="block text-xs text-[#A3A199] mb-1">
                             Jadwal Sinkronisasi Penutupan Toko
                           </label>
                           <input
@@ -1014,22 +1027,22 @@ export default function App() {
                                 pos_sync_schedule: e.target.value,
                               })
                             }
-                            className="w-full px-3.5 py-2 rounded-lg bg-slate-900 border border-slate-800 text-sm"
+                            className="w-full px-3.5 py-2 rounded-lg bg-[#1F1E1D] border border-[#3D3C39] text-sm"
                           />
                         </div>
                       </div>
                     </div>
                   ) : (
-                    <div className="p-5 rounded-xl bg-slate-950 border border-slate-800 space-y-4">
+                    <div className="p-5 rounded-xl bg-[#161615] border border-[#3D3C39] space-y-4">
                       <div className="flex items-center justify-between">
-                        <div className="text-xs font-bold text-indigo-400 uppercase tracking-wider">
+                        <div className="text-xs font-bold text-[#D97757] uppercase tracking-wider">
                           🏢 Konfigurasi Enterprise SAP S/4HANA &amp; SAP BTP
                         </div>
                         {renderStatusBadge(health?.sap)}
                       </div>
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                         <div className="sm:col-span-3">
-                          <label className="block text-xs text-slate-400 mb-1">
+                          <label className="block text-xs text-[#A3A199] mb-1">
                             SAP OData Purchase Requisition Endpoint URL (Kosongkan jika menggunakan mode BTP Sandbox)
                           </label>
                           <input
@@ -1042,11 +1055,11 @@ export default function App() {
                               })
                             }
                             placeholder="https://<s4hana-host>/sap/opu/odata/sap/API_PURCHASEREQ_PROCESS_SRV"
-                            className="w-full px-3.5 py-2 rounded-lg bg-slate-900 border border-slate-800 text-sm"
+                            className="w-full px-3.5 py-2 rounded-lg bg-[#1F1E1D] border border-[#3D3C39] text-sm"
                           />
                         </div>
                         <div>
-                          <label className="block text-xs text-slate-400 mb-1">
+                          <label className="block text-xs text-[#A3A199] mb-1">
                             Kode Plant SAP
                           </label>
                           <input
@@ -1055,11 +1068,11 @@ export default function App() {
                             onChange={(e) =>
                               setStoreForm({ ...storeForm, sap_plant: e.target.value })
                             }
-                            className="w-full px-3.5 py-2 rounded-lg bg-slate-900 border border-slate-800 text-sm"
+                            className="w-full px-3.5 py-2 rounded-lg bg-[#1F1E1D] border border-[#3D3C39] text-sm"
                           />
                         </div>
                         <div>
-                          <label className="block text-xs text-slate-400 mb-1">
+                          <label className="block text-xs text-[#A3A199] mb-1">
                             Storage Location
                           </label>
                           <input
@@ -1071,11 +1084,11 @@ export default function App() {
                                 sap_storage_location: e.target.value,
                               })
                             }
-                            className="w-full px-3.5 py-2 rounded-lg bg-slate-900 border border-slate-800 text-sm"
+                            className="w-full px-3.5 py-2 rounded-lg bg-[#1F1E1D] border border-[#3D3C39] text-sm"
                           />
                         </div>
                         <div>
-                          <label className="block text-xs text-slate-400 mb-1">
+                          <label className="block text-xs text-[#A3A199] mb-1">
                             Purchasing Organization
                           </label>
                           <input
@@ -1087,7 +1100,7 @@ export default function App() {
                                 sap_purchasing_org: e.target.value,
                               })
                             }
-                            className="w-full px-3.5 py-2 rounded-lg bg-slate-900 border border-slate-800 text-sm"
+                            className="w-full px-3.5 py-2 rounded-lg bg-[#1F1E1D] border border-[#3D3C39] text-sm"
                           />
                         </div>
                       </div>
@@ -1097,7 +1110,7 @@ export default function App() {
                   <button
                     type="submit"
                     disabled={saving}
-                    className="px-5 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-xs font-semibold text-white"
+                    className="px-5 py-2.5 rounded-lg bg-[#D97757] hover:bg-[#E58A6B] disabled:opacity-50 text-xs font-semibold text-white"
                   >
                     {saving ? "Menyimpan..." : "Simpan Konfigurasi Sumber Data"}
                   </button>
@@ -1108,7 +1121,7 @@ export default function App() {
               {activeSettingsTab === 3 && (
                 <form onSubmit={handleSaveStoreSettings} className="space-y-4 max-w-xl">
                   <div>
-                    <label className="block text-xs text-slate-400 mb-1">
+                    <label className="block text-xs text-[#A3A199] mb-1">
                       Telegram Chat ID Kepala Toko / Grup Cabang
                     </label>
                     <input
@@ -1121,11 +1134,11 @@ export default function App() {
                           telegram_chat_id: e.target.value,
                         })
                       }
-                      className="w-full px-3.5 py-2 rounded-lg bg-slate-950 border border-slate-800 text-sm"
+                      className="w-full px-3.5 py-2 rounded-lg bg-[#161615] border border-[#3D3C39] text-sm"
                     />
                   </div>
                   <div>
-                    <label className="block text-xs text-slate-400 mb-1">
+                    <label className="block text-xs text-[#A3A199] mb-1">
                       Batas Waktu Persetujuan / Timeout Tolerance (Jam)
                     </label>
                     <input
@@ -1139,13 +1152,13 @@ export default function App() {
                           timeout_tolerance_hours: parseInt(e.target.value || 4, 10),
                         })
                       }
-                      className="w-full px-3.5 py-2 rounded-lg bg-slate-950 border border-slate-800 text-sm"
+                      className="w-full px-3.5 py-2 rounded-lg bg-[#161615] border border-[#3D3C39] text-sm"
                     />
                   </div>
                   <button
                     type="submit"
                     disabled={saving}
-                    className="px-5 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-xs font-semibold text-white"
+                    className="px-5 py-2.5 rounded-lg bg-[#D97757] hover:bg-[#E58A6B] disabled:opacity-50 text-xs font-semibold text-white"
                   >
                     {saving ? "Menyimpan..." : "Simpan Pengaturan HITL Telegram"}
                   </button>
@@ -1157,9 +1170,9 @@ export default function App() {
                 <div className="space-y-6">
                   <form
                     onSubmit={handleAddSku}
-                    className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-4"
+                    className="p-4 rounded-xl bg-[#161615] border border-[#3D3C39] space-y-4"
                   >
-                    <div className="text-xs font-bold text-indigo-400 uppercase">
+                    <div className="text-xs font-bold text-[#D97757] uppercase">
                       + Tambah / Perbarui Aturan Pengadaan SKU
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
@@ -1171,7 +1184,7 @@ export default function App() {
                         onChange={(e) =>
                           setNewSku({ ...newSku, sku_id: e.target.value })
                         }
-                        className="px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-xs"
+                        className="px-3 py-2 rounded-lg bg-[#1F1E1D] border border-[#3D3C39] text-xs"
                       />
                       <input
                         type="text"
@@ -1181,7 +1194,7 @@ export default function App() {
                         onChange={(e) =>
                           setNewSku({ ...newSku, sku_name: e.target.value })
                         }
-                        className="px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-xs sm:col-span-2"
+                        className="px-3 py-2 rounded-lg bg-[#1F1E1D] border border-[#3D3C39] text-xs sm:col-span-2"
                       />
                       <select
                         value={newSku.category}
@@ -1192,14 +1205,14 @@ export default function App() {
                             is_perishable: e.target.value === "Perishable",
                           })
                         }
-                        className="px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-xs"
+                        className="px-3 py-2 rounded-lg bg-[#1F1E1D] border border-[#3D3C39] text-xs"
                       >
                         <option value="Daily Staples">Daily Staples (Sembako)</option>
                         <option value="Perishable">Perishable (Barang Segar)</option>
                         <option value="Beverage">Beverage (Minuman)</option>
                       </select>
                       <div>
-                        <label className="text-[11px] text-slate-400">
+                        <label className="text-[11px] text-[#A3A199]">
                           Harga Satuan (IDR)
                         </label>
                         <input
@@ -1213,11 +1226,11 @@ export default function App() {
                               unit_price: parseFloat(e.target.value || 15000),
                             })
                           }
-                          className="w-full px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs"
+                          className="w-full px-3 py-1.5 rounded-lg bg-[#1F1E1D] border border-[#3D3C39] text-xs"
                         />
                       </div>
                       <div>
-                        <label className="text-[11px] text-slate-400">Stok Fisik</label>
+                        <label className="text-[11px] text-[#A3A199]">Stok Fisik</label>
                         <input
                           type="number"
                           min="0"
@@ -1229,11 +1242,11 @@ export default function App() {
                               physical_stock: parseInt(e.target.value || 0, 10),
                             })
                           }
-                          className="w-full px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs"
+                          className="w-full px-3 py-1.5 rounded-lg bg-[#1F1E1D] border border-[#3D3C39] text-xs"
                         />
                       </div>
                       <div>
-                        <label className="text-[11px] text-slate-400">
+                        <label className="text-[11px] text-[#A3A199]">
                           Safety Stock Threshold
                         </label>
                         <input
@@ -1247,11 +1260,11 @@ export default function App() {
                               threshold: parseInt(e.target.value || 0, 10),
                             })
                           }
-                          className="w-full px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs"
+                          className="w-full px-3 py-1.5 rounded-lg bg-[#1F1E1D] border border-[#3D3C39] text-xs"
                         />
                       </div>
                       <div>
-                        <label className="text-[11px] text-slate-400">
+                        <label className="text-[11px] text-[#A3A199]">
                           Laju Jual / Hari
                         </label>
                         <input
@@ -1266,11 +1279,11 @@ export default function App() {
                               average_daily_burn_rate: parseFloat(e.target.value || 0),
                             })
                           }
-                          className="w-full px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs"
+                          className="w-full px-3 py-1.5 rounded-lg bg-[#1F1E1D] border border-[#3D3C39] text-xs"
                         />
                       </div>
                       <div>
-                        <label className="text-[11px] text-slate-400">
+                        <label className="text-[11px] text-[#A3A199]">
                           Lead Time (Hari)
                         </label>
                         <input
@@ -1284,11 +1297,11 @@ export default function App() {
                               lead_time_days: parseInt(e.target.value || 1, 10),
                             })
                           }
-                          className="w-full px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs"
+                          className="w-full px-3 py-1.5 rounded-lg bg-[#1F1E1D] border border-[#3D3C39] text-xs"
                         />
                       </div>
                       <div>
-                        <label className="text-[11px] text-slate-400">MOQ</label>
+                        <label className="text-[11px] text-[#A3A199]">MOQ</label>
                         <input
                           type="number"
                           min="1"
@@ -1300,11 +1313,11 @@ export default function App() {
                               moq: parseInt(e.target.value || 1, 10),
                             })
                           }
-                          className="w-full px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs"
+                          className="w-full px-3 py-1.5 rounded-lg bg-[#1F1E1D] border border-[#3D3C39] text-xs"
                         />
                       </div>
                       <div>
-                        <label className="text-[11px] text-slate-400">
+                        <label className="text-[11px] text-[#A3A199]">
                           Kelipatan Dus (Multiple)
                         </label>
                         <input
@@ -1318,11 +1331,11 @@ export default function App() {
                               packaging_multiple: parseInt(e.target.value || 1, 10),
                             })
                           }
-                          className="w-full px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs"
+                          className="w-full px-3 py-1.5 rounded-lg bg-[#1F1E1D] border border-[#3D3C39] text-xs"
                         />
                       </div>
                       <div>
-                        <label className="text-[11px] text-slate-400">
+                        <label className="text-[11px] text-[#A3A199]">
                           Masa Simpan (Hari)
                         </label>
                         <input
@@ -1335,14 +1348,14 @@ export default function App() {
                               shelf_life_days: parseInt(e.target.value || 0, 10),
                             })
                           }
-                          className="w-full px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs"
+                          className="w-full px-3 py-1.5 rounded-lg bg-[#1F1E1D] border border-[#3D3C39] text-xs"
                         />
                       </div>
                     </div>
                     <button
                       type="submit"
                       disabled={saving}
-                      className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-xs font-semibold text-white"
+                      className="px-4 py-2 rounded-lg bg-[#D97757] hover:bg-[#E58A6B] disabled:opacity-50 text-xs font-semibold text-white"
                     >
                       {saving ? "Menyimpan..." : "Simpan SKU ke Toko"}
                     </button>
@@ -1353,7 +1366,7 @@ export default function App() {
                     {skus.map((s) => (
                       <div
                         key={s.sku_id}
-                        className="p-3 rounded-lg bg-slate-950 border border-slate-800 flex items-center justify-between text-xs"
+                        className="p-3 rounded-lg bg-[#161615] border border-[#3D3C39] flex items-center justify-between text-xs"
                       >
                         <div>
                           <span className="font-bold text-white">{s.sku_name}</span> (
@@ -1379,8 +1392,8 @@ export default function App() {
               {activeSettingsTab === 5 && (
                 <div className="space-y-6">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-3">
-                      <div className="text-xs font-bold text-indigo-400 uppercase">
+                    <div className="p-4 rounded-xl bg-[#161615] border border-[#3D3C39] space-y-3">
+                      <div className="text-xs font-bold text-[#D97757] uppercase">
                         Katalog Promo Aktif (JSM / Diskon)
                       </div>
                       <div className="flex gap-2">
@@ -1391,7 +1404,7 @@ export default function App() {
                           onChange={(e) =>
                             setNewPromo({ ...newPromo, promo_name: e.target.value })
                           }
-                          className="flex-1 px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs"
+                          className="flex-1 px-3 py-1.5 rounded-lg bg-[#1F1E1D] border border-[#3D3C39] text-xs"
                         />
                         <button
                           type="button"
@@ -1408,7 +1421,7 @@ export default function App() {
                             setStoreForm({ ...storeForm, promos: updated });
                             setNewPromo({ ...newPromo, promo_name: "" });
                           }}
-                          className="px-3 py-1.5 rounded-lg bg-indigo-600 text-xs font-semibold"
+                          className="px-3 py-1.5 rounded-lg bg-[#D97757] text-xs font-semibold"
                         >
                           + Tambah
                         </button>
@@ -1417,7 +1430,7 @@ export default function App() {
                         {(storeForm.promos || []).map((p, idx) => (
                           <div
                             key={idx}
-                            className="p-2 rounded bg-slate-900 text-xs flex justify-between"
+                            className="p-2 rounded bg-[#1F1E1D] text-xs flex justify-between"
                           >
                             <span>
                               {p.promo_name} ({p.promo_type})
@@ -1439,7 +1452,7 @@ export default function App() {
                       </div>
                     </div>
 
-                    <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-3">
+                    <div className="p-4 rounded-xl bg-[#161615] border border-[#3D3C39] space-y-3">
                       <div className="text-xs font-bold text-emerald-400 uppercase">
                         Agenda Event Lokal (Pasaran Desa / Libur)
                       </div>
@@ -1451,7 +1464,7 @@ export default function App() {
                           onChange={(e) =>
                             setNewEvent({ ...newEvent, event_name: e.target.value })
                           }
-                          className="flex-1 px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs"
+                          className="flex-1 px-3 py-1.5 rounded-lg bg-[#1F1E1D] border border-[#3D3C39] text-xs"
                         />
                         <button
                           type="button"
@@ -1473,7 +1486,7 @@ export default function App() {
                         {(storeForm.local_events || []).map((ev, idx) => (
                           <div
                             key={idx}
-                            className="p-2 rounded bg-slate-900 text-xs flex justify-between"
+                            className="p-2 rounded bg-[#1F1E1D] text-xs flex justify-between"
                           >
                             <span>
                               {ev.event_name} (Dampak: {ev.impact_multiplier}x)
@@ -1502,7 +1515,7 @@ export default function App() {
                     type="button"
                     disabled={saving}
                     onClick={handleSaveStoreSettings}
-                    className="px-5 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-xs font-semibold text-white"
+                    className="px-5 py-2.5 rounded-lg bg-[#D97757] hover:bg-[#E58A6B] disabled:opacity-50 text-xs font-semibold text-white"
                   >
                     {saving ? "Menyimpan..." : "Simpan Kalender Promo & Event ke DynamoDB"}
                   </button>
@@ -1516,14 +1529,14 @@ export default function App() {
             VIEW 3: JEJAK AUDIT PENALARAN AI & PR SAP (DENGAN FILTER & PAGINATION)
         =============================================================== */}
         {mainView === "audit" && (
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4">
+          <div className="bg-[#1F1E1D] border border-[#3D3C39] rounded-2xl p-6 space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div>
                 <h2 className="text-base font-bold text-white flex items-center gap-2">
-                  <Activity className="w-5 h-5 text-indigo-400" />
+                  <Activity className="w-5 h-5 text-[#D97757]" />
                   Jejak Penalaran Kognitif Bedrock &amp; Dokumen PR SAP BTP
                 </h2>
-                <p className="text-xs text-slate-400">
+                <p className="text-xs text-[#A3A199]">
                   Mencakup Baseline Deterministik, Guardrail AI, Versi Prompt, &amp; Status Transaksi SAP.
                 </p>
               </div>
@@ -1531,7 +1544,7 @@ export default function App() {
               {/* Filter & Pencarian */}
               <div className="flex flex-wrap items-center gap-2">
                 <div className="relative">
-                  <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-2.5" />
+                  <Search className="w-3.5 h-3.5 text-[#A3A199] absolute left-3 top-2.5" />
                   <input
                     type="text"
                     placeholder="Cari toko, SKU, atau No. PR..."
@@ -1540,7 +1553,7 @@ export default function App() {
                       setAuditSearch(e.target.value);
                       setAuditPage(1);
                     }}
-                    className="pl-8 pr-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs"
+                    className="pl-8 pr-3 py-1.5 rounded-lg bg-[#161615] border border-[#3D3C39] text-xs"
                   />
                 </div>
                 <select
@@ -1549,7 +1562,7 @@ export default function App() {
                     setAuditFilterType(e.target.value);
                     setAuditPage(1);
                   }}
-                  className="px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs"
+                  className="px-3 py-1.5 rounded-lg bg-[#161615] border border-[#3D3C39] text-xs"
                 >
                   <option value="ALL">Semua Log ({auditLogs.length})</option>
                   <option value="EVAL">Hanya Evaluasi AI</option>
@@ -1559,7 +1572,7 @@ export default function App() {
             </div>
 
             {paginatedAuditLogs.length === 0 ? (
-              <p className="text-xs text-slate-400 py-8 text-center">
+              <p className="text-xs text-[#A3A199] py-8 text-center">
                 Tidak ada riwayat audit yang cocok dengan filter pencarian.
               </p>
             ) : (
@@ -1567,7 +1580,7 @@ export default function App() {
                 {paginatedAuditLogs.map((log, idx) => (
                   <div
                     key={idx}
-                    className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-2"
+                    className="p-4 rounded-xl bg-[#161615] border border-[#3D3C39] space-y-2"
                   >
                     {log.sap_pr ? (
                       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1579,7 +1592,7 @@ export default function App() {
                             {log.sap_pr.pr_number}
                           </span>
                         </div>
-                        <span className="text-xs text-slate-400">
+                        <span className="text-xs text-[#A3A199]">
                           Toko: {log.store_id} | SKU: {log.sap_pr.sku_name || log.sku_id} | Qty:{" "}
                           <b>{log.sap_pr.quantity} Pcs</b> | Nilai:{" "}
                           <b>Rp {(log.sap_pr.total_amount || 0).toLocaleString("id-ID")}</b> | Plant:{" "}
@@ -1591,34 +1604,34 @@ export default function App() {
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <div className="font-semibold text-sm text-white">
                             {log.store_name || log.store_id} —{" "}
-                            <span className="text-indigo-400">
+                            <span className="text-[#D97757]">
                               {log.sku_name || log.sku_id}
                             </span>
                           </div>
                           <div className="flex flex-wrap items-center gap-2 text-xs">
-                            <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-300">
+                            <span className="px-2 py-0.5 rounded bg-[#2A2927] text-[#FAF9F5]">
                               Cuaca: {log.weather_snapshot?.condition} (
                               {log.weather_snapshot?.temperature_c}°C)
                             </span>
                             {log.confidence_tier && (
                               <span
                                 className={`px-2 py-0.5 rounded text-[11px] font-medium ${log.confidence_tier === "HIGH_CONFIDENCE"
-                                    ? "bg-emerald-500/10 text-emerald-400"
-                                    : "bg-amber-500/10 text-amber-400"
+                                  ? "bg-emerald-500/10 text-emerald-400"
+                                  : "bg-amber-500/10 text-amber-400"
                                   }`}
                               >
                                 {log.confidence_tier}
                               </span>
                             )}
-                            <span className="px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 font-bold">
+                            <span className="px-2 py-0.5 rounded bg-[#D97757]/15 text-[#D97757] border border-[#D97757]/30 font-bold">
                               Order Final: {log.final_recommended_qty} Pcs
                             </span>
                           </div>
                         </div>
-                        <p className="text-xs text-slate-300 italic leading-relaxed">
+                        <p className="text-xs text-[#FAF9F5] italic leading-relaxed">
                           &ldquo;{log.reasoning_narrative}&rdquo;
                         </p>
-                        <div className="text-[11px] text-slate-500 flex flex-wrap gap-4">
+                        <div className="text-[11px] text-[#A3A199] flex flex-wrap gap-4">
                           <span>Stok Rak: {log.physical_stock} Pcs</span>
                           <span>
                             Baseline Python: {log.deterministic_baseline_qty ?? "-"} Pcs
@@ -1638,7 +1651,7 @@ export default function App() {
 
                 {/* Navigasi Pagination */}
                 {totalAuditPages > 1 && (
-                  <div className="flex items-center justify-between pt-3 border-t border-slate-800 text-xs text-slate-400">
+                  <div className="flex items-center justify-between pt-3 border-t border-[#3D3C39] text-xs text-[#A3A199]">
                     <span>
                       Halaman {auditPage} dari {totalAuditPages} ({filteredAuditLogs.length} item)
                     </span>
@@ -1646,14 +1659,14 @@ export default function App() {
                       <button
                         disabled={auditPage <= 1}
                         onClick={() => setAuditPage((p) => p - 1)}
-                        className="px-3 py-1 rounded bg-slate-800 disabled:opacity-40 text-white"
+                        className="px-3 py-1 rounded bg-[#2A2927] disabled:opacity-40 text-white"
                       >
                         Sebelumnya
                       </button>
                       <button
                         disabled={auditPage >= totalAuditPages}
                         onClick={() => setAuditPage((p) => p + 1)}
-                        className="px-3 py-1 rounded bg-slate-800 disabled:opacity-40 text-white"
+                        className="px-3 py-1 rounded bg-[#2A2927] disabled:opacity-40 text-white"
                       >
                         Berikutnya
                       </button>

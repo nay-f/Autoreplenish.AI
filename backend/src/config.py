@@ -47,6 +47,9 @@ def _sap_setting(name: str, default: str = "") -> str:
 
 # AWS Configuration
 AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
+ORCHESTRATOR_FUNCTION_NAME = os.getenv(
+    "ORCHESTRATOR_FUNCTION_NAME", f"autoreplenish-{os.getenv('ENVIRONMENT', 'development').lower()}-orchestrator"
+)
 AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
 AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
 ENVIRONMENT = os.getenv("ENVIRONMENT", "development").lower()
@@ -60,7 +63,7 @@ _DEFAULT_TABLE_BY_ENVIRONMENT = {
 DYNAMODB_TABLE = os.getenv(
     "DYNAMODB_TABLE", _DEFAULT_TABLE_BY_ENVIRONMENT.get(ENVIRONMENT, "AutoReplenish_DevTable")
 )
-BEDROCK_MODEL_ID = os.getenv("BEDROCK_MODEL_ID", "us.anthropic.claude-3-5-sonnet-20241022-v2:0")
+BEDROCK_MODEL_ID = os.getenv("BEDROCK_MODEL_ID", "anthropic.claude-sonnet-4-5-20250929-v1:0")
 
 # Durable approval-to-SAP processing. Configure an SQS FIFO queue in staging/production.
 APPROVAL_QUEUE_URL = os.getenv("APPROVAL_QUEUE_URL", "")

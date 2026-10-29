@@ -114,6 +114,8 @@ class TelegramApprovalState(BaseModel):
     ] = "PENDING_APPROVAL"
     rejection_reason: Optional[str] = None
     sap_pr_id: Optional[str] = None
+    telegram_chat_id: Optional[str] = None
+    telegram_message_id: Optional[int] = None
     created_at: str
     expires_at: str
 

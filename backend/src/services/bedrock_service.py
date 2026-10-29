@@ -14,8 +14,6 @@ class BedrockReasoningService:
         self.client = boto3.client(
             "bedrock-runtime",
             region_name=config.AWS_REGION,
-            aws_access_key_id=config.AWS_ACCESS_KEY_ID,
-            aws_secret_access_key=config.AWS_SECRET_ACCESS_KEY,
         )
         self.model_id = config.BEDROCK_MODEL_ID
         self.prompt_version = config.PROMPT_VERSION
@@ -62,20 +60,17 @@ class BedrockReasoningService:
 
         system_prompt = (
             f"Anda adalah AutoReplenish.ai (Prompt Version: {self.prompt_version}), "
-            "agen kognitif rantai pasok ritel.\n"
-            "Sistem Python telah menghitung 'deterministic_baseline_qty' berdasarkan defisit rak dan lead time.\n"
-            "Tugas Anda adalah menyesuaikan angka baseline tersebut berdasarkan sinyal eksternal dengan bobot Pareto:\n"
-            "- Stok fisik & Laju konsumsi (burn rate): 40%\n"
-            "- Lead time distributor: 25%\n"
-            "- Promo aktif: 15%\n"
-            "- Cuaca lokal: 10%\n"
-            "- Dinamika Kalender (Akhir pekan / Hari gajian / Event lokal): 10%\n\n"
+            "asisten pengadaan untuk staf toko dan manajer operasional.\n"
+            "Gunakan kondisi stok, kecepatan pemakaian, waktu pengiriman, cuaca, promo, "
+            "dan kalender untuk menyesuaikan jumlah pesanan yang aman.\n\n"
             "ATURAN MUTLAK:\n"
             f"1. Rentang 'recommended_qty' yang diizinkan berada di antara {min_allowed} hingga {max_allowed} unit.\n"
-            "2. Jika barang perishable (mudah rusak) dan cuaca hujan lebat atau akhir pekan sepi di area perkantoran, "
-            "turunkan rekomendasi secara konservatif untuk mencegah pembusukan (spoilage).\n"
+            "2. Jika barang mudah rusak dan permintaan diperkirakan rendah, turunkan rekomendasi secara konservatif.\n"
             "3. Balas HANYA dengan JSON VALID murni tanpa blok markdown ```json.\n"
-            "4. Gunakan Bahasa Indonesia yang jelas dan rasional pada 'reasoning_narrative'.\n\n"
+            "4. Tulis reasoning_narrative dan warnings dalam bahasa Indonesia sehari-hari, singkat, jelas, dan mudah dipahami staf toko.\n"
+            "5. reasoning_narrative maksimal 3 kalimat pendek. Jelaskan sisa stok cukup berapa lama, pengaruh cuaca/hari gajian bila relevan, serta jumlah usulan cukup untuk berapa lama.\n"
+            "6. Jangan gunakan istilah teknis seperti deterministik, Pareto, baseline, unconstrained, bobot persentase, atau burn rate.\n"
+            "7. Jangan menyebut confidence_score sebagai akurasi atau jaminan.\n\n"
             "Skema JSON Wajib:\n"
             "{\n"
             '  "recommended_qty": integer,\n'
@@ -213,8 +208,10 @@ class BedrockReasoningService:
                 confidence_tier="LOW_CONFIDENCE_GUARDRAILED",
                 risk_level="medium",
                 reasoning_narrative=(
-                    f"Kalkulasi deterministik otomatis: defisit stok ({baseline_info['stock_deficit']} unit) "
-                    f"ditambah proyeksi konsumsi selama lead time {sku.lead_time_days} hari ({baseline_info['lead_time_demand']} unit)."
+                    f"- Stok tersisa {sku.physical_stock} unit dengan perkiraan kebutuhan "
+                    f"{baseline_info['lead_time_demand']} unit selama waktu pengiriman {sku.lead_time_days} hari.\n"
+                    f"- Usulan sementara {baseline_qty} unit dibuat agar pasokan tetap tersedia "
+                    "sambil menunggu pemeriksaan manusia."
                 ),
                 key_factors=["deterministic_baseline_fallback"],
                 warnings=[
