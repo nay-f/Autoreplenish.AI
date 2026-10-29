@@ -1,161 +1,184 @@
-# AutoReplenish.ai 🛒⚡
+# AutoReplenish.ai
 
-> **Autonomous Contextual Inventory Replenishment Middleware for Retail & FMCG Networks**  
-> Powered by **AWS Bedrock (Claude Sonnet 4.5)**, **SAP S/4HANA OData**, **SAP AI Core (`sap-rpt-1.6`)**, **Telegram Bot (HITL)**, and **AWS Serverless Cloud**.
+<p align="center">
+  <strong>Autonomous Contextual Inventory Replenishment & Supply Chain Middleware</strong><br>
+  Enterprise-grade agentic replenishment integrating <strong>AWS Bedrock (Claude Sonnet 3.7 / 4.5)</strong>, <strong>SAP S/4HANA OData</strong>, <strong>SAP AI Core</strong>, and <strong>Event-Driven Serverless Infrastructure</strong>.
+</p>
 
----
-
-## 🌟 Executive Summary
-
-**AutoReplenish.ai** adalah solusi *Agentic AI Middleware* mutakhir yang dirancang khusus untuk memecahkan dilema klasik jaringan minimarket dan ritel: **Stockout vs Overstock Paradox**.
-
-Alih-alih mengandalkan formula statis (*Min-Max* atau *Moving Average*) yang buta konteks, AutoReplenish.ai menalar berbagai variabel dinamis secara simultan:
-1. **Sinyal Eksternal Riil**: Cuaca satelit GPS (hujan lebat / panas terik), kalender gajian, akhir pekan, dan agenda promo lokal.
-2. **Karakteristik SKU**: Batas kedaluwarsa barang perishable (*shelf life*), kecepatan konsumsi harian (*burn rate*), dan lead time pengiriman gudang.
-3. **Safety Guardrails**: Minimum Order Quantity (MOQ) dan kelipatan kemasan supplier (*packaging multiples*).
-4. **Human-in-the-Loop (HITL)**: Persetujuan satu klik oleh Kepala Toko via Telegram Bot sebelum PO diterbitkan.
-5. **Integrasi Enterprise End-to-End**: Transaksi otomatis diterbitkan ke **SAP S/4HANA OData** dan divalidasi oleh model tabular **SAP AI Core (`sap-rpt-1.6`)**.
-6. **Executive Web Dashboard**: Pemantauan akurasi manajer (100 - WAPE), latensi AI, dan jejak audit audit-trail tanpa angka rekayasa (*zero hardcoded metrics*).
+<p align="center">
+  <img src="https://img.shields.io/badge/Python-3.12-3776AB.svg?style=flat-square&logo=python&logoColor=white" alt="Python 3.12" />
+  <img src="https://img.shields.io/badge/AWS-Serverless%20Architecture-FF9900.svg?style=flat-square&logo=amazon-aws&logoColor=white" alt="AWS Serverless" />
+  <img src="https://img.shields.io/badge/SAP-S%2F4HANA%20OData%20v2-0FAAFF.svg?style=flat-square&logo=sap&logoColor=white" alt="SAP OData" />
+  <img src="https://img.shields.io/badge/SAP%20AI%20Core-sap--rpt--1.6-0FAAFF.svg?style=flat-square&logo=sap&logoColor=white" alt="SAP AI Core" />
+  <img src="https://img.shields.io/badge/Infrastructure-Terraform%20v1.8-844FBA.svg?style=flat-square&logo=terraform&logoColor=white" alt="Terraform" />
+  <img src="https://img.shields.io/badge/Tests-28%20Passed-10B981.svg?style=flat-square" alt="Test Suite" />
+  <img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg?style=flat-square" alt="License" />
+</p>
 
 ---
 
-## 🏗️ Arsitektur Sistem Terintegrasi
+## 📋 Ikhtisar Produk (Product Overview)
+
+**AutoReplenish.ai** adalah platform *Agentic Middleware* terdistribusi yang mengotomatisasi pengadaan inventaris ritel dan FMCG secara cerdas dan kontekstual. Sistem ini menggantikan formula statis tradisional (*Min-Max* atau *Simple Moving Average*) dengan **Cognitive Demand Reasoning Engine** yang memproses sinyal multi-dimensi secara simultan:
+
+* **Sinyal Kontekstual Eksternal**: Korelasi curah hujan dan suhu real-time via satelit OpenWeatherMap GPS, siklus hari gajian (*payday*), akhir pekan, serta kalender event promo lokal.
+* **Karakteristik & Risiko SKU**: Masa simpan barang mudah basi (*shelf-life* komoditas *perishable*), laju konsumsi harian (*burn rate*), dan *supplier lead time*.
+* **Batasan Logistik Pemasok**: Pemenuhan ketat terhadap *Minimum Order Quantity* (MOQ) dan kelipatan kemasan karton (*packaging multiple*).
+* **Tata Kelola Human-in-the-Loop (HITL)**: Persetujuan delegatif satu klik oleh Kepala Toko melalui Telegram Bot sebelum pemesanan diajukan ke ERP.
+* **Integrasi ERP Kelas Enterprise**: Penerbitan dokumen *Purchase Requisition* otomatis ke **SAP S/4HANA** melalui protokol OData v2 terotentikasi, disertai validasi kewajaran kuota oleh model tabular **SAP AI Core (`sap-rpt-1.6`)**.
+
+---
+
+## 🏛️ Arsitektur Sistem Terdistribusi
+
+Sistem dibangun di atas prinsip arsitektur *event-driven*, *zero-loss queueing*, dan *fail-safe deterministic fallback*.
 
 ```mermaid
 flowchart TD
-    subgraph SinyalEksternal ["1. Sinyal Kontekstual & POS"]
-        DDB[("Amazon DynamoDB\nCore Table (PITR & KMS)")]
-        OWM["OpenWeatherMap GPS Satelit"]
-        CAL["Kalender, Gajian, & Promo"]
+    subgraph Ingestion ["1. Sinyal Permintaan & POS"]
+        POS["POS / Inventory Store Profile"]
+        GPS["Satelit Cuaca OpenWeatherMap"]
+        CAL["Kalender Event & Siklus Promo"]
     end
 
-    subgraph AWSCloud ["2. AWS Serverless Cloud (us-east-1)"]
-        APIGW["Amazon API Gateway HTTP"]
-        L_Orch["Lambda: Orchestrator Engine"]
-        Bedrock["AWS Bedrock\nClaude Sonnet 4.5"]
+    subgraph AWS_Cloud ["2. AWS Serverless Core (us-east-1)"]
+        APIGW["Amazon API Gateway HTTP v2"]
+        L_Orch["AWS Lambda: Orchestrator Engine"]
+        Bedrock["AWS Bedrock (Claude Sonnet)"]
+        DDB[("Amazon DynamoDB\nSingle-Table Core (PITR + KMS)")]
         SQS["Amazon SQS FIFO\n(approval.fifo + DLQ)"]
-        L_Wrk["Lambda: SAP Worker"]
-        CW["Amazon CloudWatch\n(10 Metric Alarms Active)"]
+        L_Worker["AWS Lambda: SAP Worker"]
+        CW["Amazon CloudWatch\n(10 Metric Alarms & Insights)"]
     end
 
-    subgraph UserInterface ["3. Antarmuka Operasional"]
-        Dashboard["Executive Web Dashboard\n(React + Claude Dark + IBM Plex Mono)"]
-        Telegram["Telegram Bot HITL\n(@autoreplenish_ai_bot)"]
+    subgraph Governance ["3. Human-In-The-Loop & Monitoring"]
+        Telegram["Telegram Bot Webhook\n(HMAC SHA-256 Verified)"]
+        Dashboard["Executive Web Dashboard\n(React + Tailwind + IBM Plex Mono)"]
     end
 
-    subgraph SAPPlatform ["4. SAP BTP Cloud Foundry (ap10)"]
-        BTP["App: autoreplenish-sap-btp\n(S/4HANA OData Receiver)"]
-        AICore["SAP AI Core\n(Model: sap-rpt-1.6 Tabular)"]
+    subgraph Enterprise_ERP ["4. SAP Ecosystem (Cloud Foundry ap10)"]
+        BTP["SAP BTP Integration Hub\n(S/4HANA OData Receiver)"]
+        AICore["SAP AI Core\n(Model: sap-rpt-1.6 Tabular Engine)"]
     end
 
-    Dashboard <-->|HTTPS + JWT| APIGW
-    Telegram <-->|Webhook + HMAC| APIGW
+    POS --> APIGW
     APIGW --> L_Orch
-    L_Orch --> SinyalEksternal
+    L_Orch --> GPS
+    L_Orch --> CAL
     L_Orch --> Bedrock
+    L_Orch --> DDB
     L_Orch --> Telegram
 
-    Telegram -->|Tombol Approve| SQS
-    SQS --> L_Wrk
-    L_Wrk -->|OData POST + CSRF Fetch| BTP
+    Telegram -->|Callback Persetujuan| APIGW
+    APIGW --> SQS
+    SQS --> L_Worker
+    L_Worker -->|X-CSRF Fetch + OData POST| BTP
     BTP -->|Validasi Regresi Kuota| AICore
-    L_Wrk -->|Update Status Transaksi| Telegram
-    L_Wrk -->|Jejak Audit Persisten| DDB
+    L_Worker -->|Update Status Transaksi| DDB
+    L_Worker -->|Konfirmasi Nomor PR| Telegram
 
-    CW -.->|Pemantauan Antrean & Error| SQS
-    CW -.->|Pemantauan Health Lambda| L_Wrk
+    Dashboard <-->|REST API + JWT Bearer| APIGW
+    CW -.->|Observability & Telemetri| L_Orch
+    CW -.->|Monitoring Antrean DLQ| SQS
+    CW -.->|Monitoring Eksekusi SAP| L_Worker
 ```
 
 ---
 
-## 🎯 Fitur & Nilai Tambah Utama
+## ⚡ Fitur Utama & Keunggulan Rekayasa
 
-- **Zero-Loss Async Approval Architecture**: Approval dari Telegram tidak memblokir thread webhook, melainkan dimasukkan ke antrean berbobot **Amazon SQS FIFO** dengan penomoran sekuensial dan *Dead Letter Queue (DLQ)*.
-- **Double-Submit & Idempotency Protection**: Mekanisme penguncian berbasis *DynamoDB Conditional Expressions* (`attribute_exists` & `status = PENDING_APPROVAL`) menjamin tombol approve yang diklik berkali-kali tidak akan menerbitkan Purchase Requisition ganda.
-- **Deterministic Safe Fallback**: Jika layanan AI atau konektivitas luar mengalami gangguan, *deterministic rule engine* lokal secara otomatis mengambil alih perhitungan stok dengan anotasi transparan (`DETERMINISTIC_FALLBACK`) agar toko tidak pernah berhenti beroperasi.
-- **SAP AI Core Model `sap-rpt-1.6` Verification**: Dokumen PR yang masuk ke SAP BTP Cloud Foundry langsung divalidasi oleh model AI tabular SAP untuk memprediksi kewajaran kuota restock terhadap riwayat historis.
-- **Claude Dark Mode & IBM Plex Mono Dashboard**: Desain antarmuka profesional bertaraf *enterprise developer-tool* dengan kontras tinggi, border datar 1px (`#3D3C39`), aksen oranye tanah liat (*clay* `#D97757`), dan tipografi monospace penuh.
+### 1. Zero-Loss Asynchronous Approval Architecture
+Persetujuan dari Kepala Toko diproses secara asinkron menggunakan **Amazon SQS FIFO** dengan *Message Deduplication ID* berbasis hash transaksi. Hal ini memastikan webhook Telegram merespons instan (< 200 ms) tanpa membebani proses I/O ke SAP, sekaligus mencegah *lost updates* atau *out-of-order execution*.
+
+### 2. Idempotency & Double-Submit Protection
+Mekanisme penguncian mutlak menggunakan *DynamoDB Conditional Writes* (`attribute_exists(PK) AND #status IN (:pending, :edit)`). Tombol persetujuan yang ditekan berulang kali atau pesan duplikat dari jaringan seluler secara otomatis ditolak tanpa menimbulkan duplikasi *Purchase Requisition*.
+
+### 3. Fail-Safe Deterministic Fallback Engine
+Apabila terjadi gangguan jaringan eksternal, latensi tinggi, atau batasan kuota AI, orkestrator secara transparan beralih ke mesin deterministik berbasis aturan stok pengaman (*Safety Stock Formula*). Status transisi dicatat dengan flag `DETERMINISTIC_FALLBACK` sehingga operasional toko fisik tetap berjalan 100% tanpa henti (*zero operational downtime*).
+
+### 4. Validasi Model Tabular SAP AI Core (`sap-rpt-1.6`)
+Setiap dokumen yang masuk ke endpoint OData SAP BTP dikirimkan ke model regresi tabular `sap-rpt-1.6` di SAP AI Core untuk memverifikasi apakah rekomendasi kuota berada dalam rentang kewajaran historis pengadaan material tersebut.
+
+### 5. Enterprise Observability & Audit Trail
+Seluruh keputusan algoritmik merekam jejak audit lengkap: versi *prompt*, parameter suhu cuaca, baseline deterministik, respon model AI, identitas manajer penyetuju, dan nomor dokumen SAP. Dasbor analitik menyajikan metrik kepatuhan manajer, deviasi WAPE (*Weighted Absolute Percentage Error*), serta latensi sistem secara real-time.
 
 ---
 
-## 📁 Struktur Direktori Repositori
+## 📂 Struktur Repositori
 
 ```text
 autoreplenish.ai/
-├── backend/                        # Backend Python 3.12 (AWS Lambda & FastAPI)
-│   ├── lambda_handlers.py          # Entrypoints: Orchestrator, Webhook, Dashboard API, SAP Worker
-│   ├── main.py                     # FastAPI routes: Auth JWT, Health, Store & SKU CRUD, Metrics
-│   ├── requirements-lambda.txt     # Dependensi ramping untuk paket deployment Lambda
+├── backend/                        # Layanan Backend Python 3.12 (AWS Lambda & FastAPI)
+│   ├── lambda_handlers.py          # Entrypoints Lambda: Orchestrator, Webhook, API, Worker
+│   ├── main.py                     # Router FastAPI: Auth JWT, Health, Store & SKU CRUD, Metrik
+│   ├── requirements-lambda.txt     # Dependensi kompilasi ramping untuk runtime Lambda
 │   └── src/
-│       ├── auth.py                 # JWT Bearer Token generator & verifier (PBKDF2/bcrypt)
-│       ├── config.py               # Runtime configuration & AWS Secrets Manager loader
-│       ├── models/schema.py        # Pydantic schemas (StoreProfile, SKUItem, AuditLog, dsb.)
-│       └── services/               # Layanan modular (Bedrock, DynamoDB, SQS, SAP, Telegram, Weather)
-├── dashboard/                      # Web Dashboard Frontend (React + Vite + Tailwind CSS)
+│       ├── auth.py                 # Keamanan JWT Bearer & verifikasi password bcrypt
+│       ├── config.py               # Integrasi konfigurasi runtime & AWS Secrets Manager
+│       ├── models/schema.py        # Kontrak data Pydantic (StoreProfile, SKUItem, AuditLog)
+│       └── services/               # Modul layanan (Bedrock, DynamoDB, SQS, SAP, Telegram, Weather)
+├── dashboard/                      # Web Dashboard Frontend (React 18 + Vite + Tailwind CSS)
 │   ├── src/
-│   │   ├── App.jsx                 # Dashboard UI: Monitor, 5-Tab Store Settings, Audit Trail
-│   │   ├── api.js                  # Axios client dengan interceptor JWT Bearer
+│   │   ├── App.jsx                 # UI Utama: Monitoring, 5-Tab Store Settings, Audit Trail
+│   │   ├── api.js                  # Klien HTTP Axios dengan interceptor token terotentikasi
 │   │   └── index.css               # Claude Dark Mode Design System & IBM Plex Mono typography
-│   ├── index.html                  # HTML template dengan konfigurasi Tailwind kustom
-│   └── vite.config.js              # Vite server & reverse proxy configuration
-├── infra/terraform/                # AWS Infrastructure-as-Code (Terraform)
-│   ├── api_gateway.tf              # HTTP API Gateway v2 routes & stage logging
-│   ├── dynamodb.tf                 # Core Single-Table DynamoDB dengan GSI & PITR
-│   ├── eventbridge.tf              # Jadwal otomatisasi 03:00 WIB & 14:00 WIB
-│   ├── iam.tf                      # IAM roles & least-privilege security policies
-│   ├── lambda.tf                   # 4 Lambda functions definition, timeout, memory
-│   ├── sqs.tf                      # SQS FIFO approval queue & Dead Letter Queues
-│   ├── alarms.tf                   # 10 CloudWatch Metric Alarms & Log filters
-│   └── production.tfvars.example   # Template variabel lingkungan Terraform
-├── sap-btp-service/                # Layanan Microservice SAP BTP Cloud Foundry (Python Flask)
-│   ├── app.py                      # Endpoint OData S/4HANA Receiver & SAP AI Core bridge
+│   ├── index.html                  # HTML Shell dengan Google Fonts IBM Plex Mono
+│   └── vite.config.js              # Konfigurasi server Vite & reverse-proxy Gateway
+├── infra/terraform/                # AWS Infrastructure-as-Code (Terraform v1.8+)
+│   ├── api_gateway.tf              # HTTP API Gateway v2, routing, CORS, dan stage log
+│   ├── dynamodb.tf                 # Tabel DynamoDB Single-Table (GSI, KMS, Point-in-Time Recovery)
+│   ├── eventbridge.tf              # Scheduler siklus otomatisasi (03:00 WIB & 14:00 WIB)
+│   ├── iam.tf                      # Kebijakan IAM Least-Privilege untuk tiap fungsi Lambda
+│   ├── lambda.tf                   # Definisi 4 fungsi AWS Lambda (memory, timeout, env vars)
+│   ├── sqs.tf                      # Antrean SQS FIFO approval dan Dead-Letter Queue (DLQ)
+│   ├── alarms.tf                   # 10 CloudWatch Metric Alarms (DLQ, latency, error, fallback)
+│   └── production.tfvars.example   # Template variabel Terraform lingkungan produksi
+├── sap-btp-service/                # Microservice SAP BTP Cloud Foundry (Python Flask + Gunicorn)
+│   ├── app.py                      # Endpoint OData S/4HANA Receiver & SAP AI Core Bridge
 │   ├── manifest.yml.example        # Template manifest Cloud Foundry deployment
 │   ├── requirements.txt            # Dependensi Flask, Gunicorn, Requests
-│   └── runtime.txt                 # Python runtime specification (3.12.x)
-├── tests/                          # Automated Pytest Suite (Unit, Queue, Webhook, Security)
-├── PRD.md                          # Product Requirements Document (Single Source of Truth)
+│   └── runtime.txt                 # Konfigurasi runtime Cloud Foundry (Python 3.12.x)
+├── tests/                          # Automated Pytest Suite (Unit, Queue, Security, Idempotency)
+├── PRD_Present.md                  # Dokumen Spesifikasi Produk & Panduan Presentasi Lengkap
+├── PRD.md                          # Dokumen Persyaratan Produk Arsitektural Utama
 ├── .gitignore                      # Proteksi keamanan secret, biner, dan file lokal
-└── README.md                       # Dokumentasi resmi proyek
+└── README.md                       # Dokumentasi resmi repositori
 ```
 
 ---
 
-## 🚀 Panduan Menjalankan Proyek (Quick Start)
+## 🛠️ Panduan Penerapan & Operasional (Deployment Guide)
 
 ### 1. Prasyarat Sistem
-- Python 3.12+
-- Node.js 20+ & npm
-- AWS CLI v2 (terautentikasi dengan kredensial IAM yang valid)
-- Terraform v1.8+
-- Docker (untuk build paket kompilasi AWS Lambda Linux x86_64)
+* **Python**: `^3.12`
+* **Node.js**: `^20.x` & npm
+* **AWS CLI**: v2 (terautentikasi ke region `us-east-1` dengan izin Administrator/DevOps)
+* **Terraform**: `>= 1.8.0`
+* **Cloud Foundry CLI (`cf`)**: Terautentikasi ke endpoint SAP BTP
+* **Docker Engine**: Digunakan untuk membuat paket binary zip AWS Lambda (Linux x86_64)
 
-### 2. Menjalankan Web Dashboard (Frontend)
+---
+
+### 2. Konfigurasi Rahasia Lingkungan (Secrets Management)
+Seluruh kredensial sensitif dikelola melalui **AWS Secrets Manager** pada secret ID `autoreplenish/production/application`:
+
+| Kunci Rahasia | Keterangan |
+| :--- | :--- |
+| `JWT_SECRET_KEY` | Kunci simetris penandatanganan token JWT sesi dasbor |
+| `ADMIN_USERNAME` | Username administrator web dashboard |
+| `ADMIN_PASSWORD` | Password otentikasi administrator |
+| `TELEGRAM_BOT_TOKEN` | Token otentikasi BotFather Telegram |
+| `TELEGRAM_WEBHOOK_SECRET` | Kunci HMAC SHA-256 verifikasi header `X-Telegram-Bot-Api-Secret-Token` |
+| `OPENWEATHER_API_KEY` | Kunci akses API satelit OpenWeatherMap |
+
+---
+
+### 3. Kompilasi & Penerapan Infrastruktur AWS (Terraform)
+
+Jalankan perintah berikut untuk mengompilasi dependensi Lambda ke lingkungan Linux Amazon dan menerapkan infrastruktur:
+
 ```powershell
-# Pindah ke direktori dashboard
-cd dashboard
-
-# Salin konfigurasi environment
-Copy-Item .env.example .env
-
-# Pasang dependensi dan jalankan server dev
-npm install
-npm run dev
-```
-Buka browser di **`http://localhost:5173`**. Masukkan kredensial admin:
-- **Username**: `production-admin`
-- **Password**: *(Kredensial tersimpan aman di AWS Secrets Manager `autoreplenish/production/application`)*
-- **Peran (Role)**: `IT Administrator` / `Store Manager`
-
-### 3. Menjalankan Pengujian Otomatis (Pytest)
-```powershell
-# Jalankan seluruh test suite dari root direktori
-python -m pytest tests/ -v
-```
-*(Seluruh 28 pengujian unit, queue worker, dan validasi konfigurasi akan berstatus `PASSED`).*
-
-### 4. Build Artifact Lambda & Deploy ke AWS via Terraform
-```powershell
-# 1. Build paket deployment zip menggunakan Docker SAM container
+# 1. Kompilasi dependensi Lambda menggunakan kontainer Amazon Linux
 docker run --rm -v "${PWD}:/var/task" public.ecr.aws/sam/build-python3.12:latest-x86_64 `
   sh -c "rm -rf /tmp/pkg && mkdir -p /tmp/pkg && \
          pip install --no-cache-dir -r backend/requirements-lambda.txt -t /tmp/pkg && \
@@ -164,49 +187,91 @@ docker run --rm -v "${PWD}:/var/task" public.ecr.aws/sam/build-python3.12:latest
          cd /tmp/pkg && zip -r9 /var/task/build/lambda.zip . && \
          cd /var/task && zip -g -r9 build/lambda.zip backend -x 'backend/__pycache__/*'"
 
-# 2. Deploy infrastruktur via Terraform
+# 2. Inisialisasi dan terapkan infrastruktur Terraform
 cd infra/terraform
 terraform init
+terraform plan -var-file="production.tfvars"
 terraform apply -var-file="production.tfvars" -auto-approve
 ```
 
 ---
 
-## 🛡️ Keamanan & Observability Produksi
+### 4. Penerapan Layanan SAP BTP Cloud Foundry
 
-1. **Zero Secret in Git**: Seluruh token bot Telegram, OpenWeather API key, secret JWT, password admin, dan kredensial SAP disimpan secara terisolasi pada **AWS Secrets Manager**.
-2. **Least Privilege IAM**: Masing-masing fungsi Lambda (`dashboard-api`, `orchestrator`, `telegram-webhook`, `sap-worker`) memiliki peran IAM tersendiri dengan izin yang dibatasi ketat ke resource target.
-3. **10 CloudWatch Metric Alarms**:
-   - `approval-dlq-not-empty`: Alarm jika ada pesan approval yang gagal diproses worker.
-   - `approval-queue-age`: Alarm jika antrean tertahan lebih dari 15 menit.
-   - `scheduler-dlq-not-empty`: Alarm jika event otomatisasi EventBridge gagal tereksekusi.
-   - `bedrock-fallback`: Alarm jika terjadi eskalasi kegagalan model AI ke deterministik.
-   - `sap-failure`: Alarm jika komunikasi OData ke SAP BTP mengalami error.
-   - `sap-worker-errors`, `sap-worker-throttles`, `orchestrator-errors`, `webhook-errors`, `dashboard-errors`.
+Deploy microservice penerima OData S/4HANA dan jembatan SAP AI Core:
 
----
+```powershell
+cd sap-btp-service
 
-## 🎬 Alur Demonstrasi Demo Day (Live 5-Menit)
+# Salin manifest template dan sesuaikan kredensial AI Core
+Copy-Item manifest.yml.example manifest.yml
 
-Saat presentasi di hadapan dewan juri, demonstrasi dijalankan secara berdampingan:
+# Unggah dan jalankan aplikasi di space Cloud Foundry
+cf push
+```
 
-1. **Layar Proyektor (Web Dashboard)**:
-   - Menampilkan status 4 integrasi hijau (**`CONNECTED`**): AWS Bedrock, OpenWeatherMap, Telegram, dan SAP BTP S/4HANA.
-   - Memilih gerai `STR-PILOT-01` (Semarang 01) yang memantau 4 SKU, termasuk komoditas cepat rusak (*Susu Segar Pasteurisasi*).
-   - Menekan tombol **"Analisa Stok Sekarang (On-Demand)"**.
-2. **Ponsel Presenter (Telegram Bot `@autoreplenish_ai_bot`)**:
-   - Menunjukkan notifikasi rekomendasi masuk seketika dengan penalaran kontekstual Claude Sonnet 4.5.
-   - Menekan tombol **`[ Approve ]`**.
-   - Kartu Telegram langsung ter-update menjadi status resmi **`SAP_SUBMITTED`** lengkap dengan nomor Purchase Requisition unik (`PR-SAP-...`).
-3. **Layar Tengah (Buktikan di SAP BTP Cloud Foundry Hub)**:
-   - Membuka `https://autoreplenish-sap-btp.cfapps.ap10.hana.ondemand.com/`.
-   - Memperlihatkan bahwa dokumen PR telah masuk ke ledger SAP BTP secara real-time dan divalidasi oleh model **SAP AI Core `sap-rpt-1.6`** (`http_status: 200`).
-4. **Penutup (Dashboard Jejak Audit & Metrik)**:
-   - Kembali ke Dashboard, tab **Audit AI & PR SAP**.
-   - Menunjukkan metrik **`20 / 20 PR (Success Rate: 100%)`**, deviasi WAPE yang rendah, dan rekam jejak audit tersimpan permanen di DynamoDB.
+Endpoint layanan akan aktif pada:  
+`https://autoreplenish-sap-btp.cfapps.ap10.hana.ondemand.com/odata/s4hana`
 
 ---
 
-## 👥 Tim Pengembang
+### 5. Menjalankan Executive Web Dashboard (Frontend)
 
-Dikembangkan dengan bangga untuk **AWS & SAP Hackathon 2026** oleh Tim **AutoReplenish.ai**.
+```powershell
+cd dashboard
+
+# Salin template environment
+Copy-Item .env.example .env
+
+# Pasang dependensi dan nyalakan dev server
+npm install
+npm run dev
+```
+
+Akses dasbor melalui antarmuka web pada **`http://localhost:5173`**.
+
+---
+
+## 🧪 Validasi Pengujian Otomatis (Automated Test Suite)
+
+Repositori dilengkapi dengan rangkaian pengujian unit, integritas antrean, dan validasi keamanan:
+
+```powershell
+# Eksekusi seluruh rangkaian pengujian dari direktori root
+python -m pytest tests/ -v
+```
+
+Cakupan pengujian meliputi:
+* `test_orchestrator.py`: Pengujian logika penimbangan cuaca, lead-time, dan kalkulasi baseline.
+* `test_queue_worker.py`: Verifikasi alur antrean SQS FIFO, retry policy, dan penanganan DLQ.
+* `test_security.py`: Verifikasi validasi signature webhook Telegram (HMAC) dan sanitasi input.
+* `test_idempotency.py`: Validasi pencegahan approval ganda melalui conditional lock database.
+
+---
+
+## 📊 Metrik Kepatuhan & Observability Produksi
+
+Platform memantau kesehatan operasional secara berkelanjutan melalui 10 **Amazon CloudWatch Metric Alarms**:
+
+| Nama Alarm CloudWatch | Threshold / Kondisi Pemicu | Tingkat Keparahan | Tindakan Remediasi |
+| :--- | :--- | :--- | :--- |
+| `approval-dlq-not-empty` | Jumlah pesan pada antrean DLQ `> 0` | **CRITICAL** | Notifikasi teknisi on-call; pesan tersimpan aman di DLQ untuk replay |
+| `approval-queue-age` | Usia pesan tertua dalam antrean `> 900s` | **WARNING** | Peningkatan kapasitas konkurensi Lambda SAP Worker |
+| `bedrock-fallback-rate` | Deteksi fallback deterministik `> 3 event` | **WARNING** | Evaluasi kuota token Bedrock dan status regional model |
+| `sap-integration-failure` | Kegagalan OData HTTP 5xx `> 2 event` | **CRITICAL** | Pengecekan konektivitas SAP BTP Destination / token OAuth |
+| `orchestrator-error-rate` | Error eksekusi orkestrasi `> 0` | **HIGH** | Analisis log CloudWatch Insights untuk identifikasi anomali input |
+
+---
+
+## 🔒 Kebijakan Keamanan & Kepatuhan Enterprise
+
+1. **Zero Secret in Source Control**: Tidak ada token, kunci privat, atau password yang disimpan di dalam repositori kode. Seluruh konfigurasi sensitif disuntikkan secara dinamis melalui AWS Secrets Manager pada saat runtime.
+2. **Prinsip Least-Privilege IAM**: Setiap fungsi Lambda diisolasi ke dalam IAM Role mandiri. Tidak ada fungsi yang memiliki izin wildcard (`*`) pada tabel database atau antrean pesan.
+3. **Enkripsi Data End-to-End**: Seluruh komunikasi data dalam transit dilindungi protokol **TLS 1.3 / HTTPS**. Data saat istirahat (*at-rest*) di DynamoDB dienkripsi menggunakan kunci **AWS KMS (KMS CMK)** dengan cadangan berkesinambungan (*Point-In-Time Recovery / PITR*).
+4. **Verifikasi Tanda Tangan Webhook**: Setiap update callback dari Telegram divalidasi menggunakan token rahasia webhook (`X-Telegram-Bot-Api-Secret-Token`) guna menangkal serangan *Spoofing* dan *Replay Attack*.
+
+---
+
+## 📄 Lisensi
+
+Didistribusikan di bawah lisensi **Apache License 2.0**. Lihat berkas `LICENSE` untuk informasi selengkapnya.
